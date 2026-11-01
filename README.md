@@ -66,7 +66,30 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
 
 ## Strength (measured against Stockfish)
 
-<!--ELO-->
+Chess 47 (PC build, same engine) against **Stockfish 16** with `UCI_LimitStrength`
+at a fixed `UCI_Elo` and 100 ms per move. Chess 47 got a **fixed node budget** per move
+to imitate the calculator's speed. Each match is 20 games with alternating colours
+and varied openings (random start positions for Chess960). Script: `test/run_matches.sh`.
+
+| Imitates on the DM42n | Nodes/move | vs Stockfish | Result | Score | Est. Elo |
+|---|---:|---:|---|---:|---:|
+| level 6–7, battery (80 MHz) | 25 000 | 1600 | +15 =2 −3 | 80% | ~1840 |
+| level 6–7, battery (80 MHz) | 25 000 | 2000 | +5 =4 −11 | 35% | ~1890 |
+| level 7–8, USB power (160 MHz) | 100 000 | 2000 | +13 =4 −3 | 75% | ~2190 |
+| level 7–8, USB power (160 MHz) | 100 000 | 2400 | +6 =6 −8 | 45% | ~2365 |
+| **Chess960**, USB power | 100 000 | 2200 | +4 =7 −9 | 38% | ~2110 |
+| level 9 (30 s), USB power | 400 000 | 2400 | +7 =8 −5 | 55% | ~2435 |
+
+**Roughly 1850 on battery, 2200–2300 on USB power, about 2400 at level 9.**
+
+Please read these as rough estimates:
+* 20 games per match means about ±100 Elo of statistical error.
+* Stockfish's `UCI_Elo` is calibrated at longer time controls. At 100 ms per move it plays
+  somewhat below its nominal rating, so the absolute numbers are probably **optimistic by
+  100–200 points**. Treat it as a strong club player, not a master.
+* The DM42n speed (~10k / ~19k nodes/s) is estimated from instruction counts, not measured
+  on hardware yet. The calculator's INFO screen shows the real nodes/s after a search.
+
 
 ## Stockfish on Linux over USB
 

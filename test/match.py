@@ -11,6 +11,7 @@ Prints W/D/L and the Elo difference estimate.
 import argparse
 import math
 import random
+import shutil
 import sys
 
 import chess
@@ -51,10 +52,15 @@ def main():
     ap.add_argument("--960", dest="c960", action="store_true")
     ap.add_argument("--engine", default="build/chess47-uci")
     ap.add_argument("--seed", type=int, default=47)
+    ap.add_argument("--level", type=int, default=-1, help="Chess 47 level 1-9 (default: full strength = level 9)")
+    ap.add_argument("--stockfish", default=shutil.which("stockfish") or "/usr/games/stockfish",
+                    help="the Stockfish binary (default: the one on PATH)")
     a = ap.parse_args()
 
     c47 = chess.engine.SimpleEngine.popen_uci([a.engine, "-q"])
-    sf = chess.engine.SimpleEngine.popen_uci("/usr/games/stockfish")
+    if 1 <= a.level <= 9:
+        c47.configure({"Level": a.level})
+    sf = chess.engine.SimpleEngine.popen_uci(a.stockfish)
     sf.configure({"UCI_LimitStrength": True, "UCI_Elo": a.elo, "Threads": 1, "Hash": 16})
     # python-chess sends UCI_Chess960 itself when the board is a 960 board
 
@@ -76,8 +82,13 @@ def main():
     c47.quit()
     sf.quit()
     sc = (w + 0.5 * d) / a.games
+    # the 95% margin of the score (normal approximation), turned into Elo
+    var = (w * (1 - sc) ** 2 + d * (0.5 - sc) ** 2 + l * sc ** 2) / a.games
+    m = 1.96 * math.sqrt(var / a.games)
+    lo, hi = elo_diff(sc - m), elo_diff(sc + m)
     print(f"{'960' if a.c960 else 'std'} nodes={a.nodes:>7} vs SF{a.elo}: +{w} ={d} -{l}  "
-          f"score {sc*100:.0f}%  => Chess47 ~ {a.elo + elo_diff(sc):.0f}", flush=True)
+          f"score {sc*100:.0f}%  => Chess47 ~ {a.elo + elo_diff(sc):.0f}  "
+          f"(95%: {a.elo + lo:.0f} .. {a.elo + hi:.0f})", flush=True)
 
 
 if __name__ == "__main__":

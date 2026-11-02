@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """dm42view.py - the DM42n's screen in your terminal, sent over USB by NAV47 (>> >> USB) or Chess 47 (>> >> USB).
 
-    python3 tools/dm42view.py                     # /dev/ttyACM0, Braille dots: 200 x 60 characters
+    python3 tools/dm42view.py                     # the DM42n (found by name), Braille dots: 200 x 60 characters
+    python3 tools/dm42view.py /dev/ttyACM1        # or a given port
     python3 tools/dm42view.py --zoom 0,0,200,104  # a part of the screen, bigger (x, y, width, height)
     python3 tools/dm42view.py --blocks            # half blocks: 1 character = 1 x 2 pixels (needs 400 columns)
     python3 tools/dm42view.py --png shots/        # also save every screen as a PNG (needs Pillow)
@@ -77,7 +78,8 @@ def blocks(px, x0, y0, w, h):
 
 def main():
     ap = argparse.ArgumentParser(description='The DM42n screen (NAV47 / Chess 47 USB) in the terminal.')
-    ap.add_argument('port', nargs='?', default='/dev/ttyACM0', help='serial port, or a file of frames')
+    ap.add_argument('port', nargs='?', default=None,
+                    help='serial port, or a file of frames (default: the DM42n found in /dev/serial/by-id)')
     ap.add_argument('--zoom', help='x,y,w,h: show only this part, as big as the terminal allows')
     ap.add_argument('--blocks', action='store_true', help='half blocks instead of Braille dots')
     ap.add_argument('--png', help='save every frame as a PNG in this folder')
@@ -86,6 +88,11 @@ def main():
     ap.add_argument('--latest', help='write each frame to this one PNG file (for an image viewer that reloads it)')
     ap.add_argument('--quiet', action='store_true', help='no picture in the terminal (with --png / --latest)')
     a = ap.parse_args()
+    if not a.port:                                  # the DM42n by name: ttyACM0, ACM1 ... whichever it got
+        import glob
+        found = sorted(glob.glob('/dev/serial/by-id/*SwissMicros_DM42n*'))
+        a.port = found[0] if found else '/dev/ttyACM0'
+        print('port', a.port)
     x0, y0, w, h = map(int, a.zoom.split(',')) if a.zoom else (0, 0, W, H)
     n = 0
     try:

@@ -48,13 +48,14 @@ static Game *G;
 
 #define CUR (&G->hist[G->n])
 
-enum { MODE_HC = 0, MODE_HH, MODE_CC, MODE_USB, MODE_CNT };
-static const char *MODE_NAME[MODE_CNT] = { "You vs CPU", "2 players", "CPU vs CPU", "You vs USB" };
+enum { MODE_HC = 0, MODE_HH, MODE_CC, MODE_USB, MODE_EUSB, MODE_CNT };
+static const char *MODE_NAME[MODE_CNT] = { "You vs CPU", "2 players", "CPU vs CPU", "You vs USB", "CPU vs USB" };
+#define VS_USB (cfg.mode == MODE_USB || cfg.mode == MODE_EUSB)
 
 typedef struct {
   int8_t level;      /* 0 = CRAZY, 1..9 */
   int8_t mode;
-  int8_t human;      /* colour played by the human in MODE_HC */
+  int8_t human;      /* colour played by the human in MODE_HC and MODE_USB; by the calculator's engine in MODE_EUSB */
   int8_t flip;
   int8_t tc;         /* time control index */
   int8_t sound;
@@ -97,6 +98,10 @@ static uint32_t last_nps, last_think_ms;
 static Result   last_res;
 static uint32_t last_tick;
 static uint32_t rng = 0x47474747u;
+/* CPU vs USB: the PC holds the engine until "go" (while it catches the board up) and gives the game's clock */
+static int      usb_hold;
+static char     end_txt[40];               /* "end <text>": how the game ended on the PC's side */
+static int32_t  usb_left = -1, usb_inc;    /* the engine's time left and increment, ms (-1: no clock) */
 
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                     */
@@ -113,9 +118,12 @@ static void beep(int hz, int ms) {
 
 static int is_human(int side) {
   if (cfg.mode == MODE_HH) return 1;
-  if (cfg.mode == MODE_CC) return 0;
+  if (cfg.mode == MODE_CC || cfg.mode == MODE_EUSB) return 0;
   return side == cfg.human;
 }
+
+/* the side whose moves come over USB (vs USB modes) */
+static int usb_side(int side) { return VS_USB && side != cfg.human; }
 
 static void fmt_clock(int32_t ms, char *s) {
   if (ms < 0) ms = 0;
@@ -283,6 +291,7 @@ static const char *result_text(int code, int loser) {
   case 5: return "Repetition 1/2";
   case 6: return loser == WHITE ? "W flag fell 0-1" : "B flag fell 1-0";
   case 7: return loser == WHITE ? "W resigns 0-1" : "B resigns 1-0";
+  case 8: return end_txt[0] ? end_txt : "Game over";
   }
   return "";
 }
@@ -317,6 +326,7 @@ static void draw_panel(void) {
   if (cfg.mode == MODE_HH) sprintf(s, "2 players");
   else if (cfg.mode == MODE_CC) sprintf(s, "Demo  %s", lv);
   else if (cfg.mode == MODE_USB) sprintf(s, "vs USB  You:%s", cfg.human ? "Black" : "White");
+  else if (cfg.mode == MODE_EUSB) sprintf(s, "%s vs USB  CPU:%s", lv, cfg.human ? "Black" : "White");
   else sprintf(s, "%s  You:%s", lv, cfg.human ? "Black" : "White");
   text_at(t20, 2, y, s, 0);
   y += h;
@@ -398,6 +408,7 @@ static void draw_banner(void) {
   case 5: L[0] = "DRAW"; L[1] = "3-fold repetition"; L[2] = "1/2-1/2"; break;
   case 6: L[0] = "TIME"; L[1] = loser == WHITE ? "White's flag fell" : "Black's flag fell"; L[2] = win; break;
   case 7: L[0] = "RESIGNS"; L[1] = loser == WHITE ? "White resigns" : "Black resigns"; L[2] = win; break;
+  case 8: L[0] = "GAME OVER"; L[1] = end_txt; break;
   default: return;
   }
   int h24 = lh(t24), h20 = lh(t20), n = L[1][0] ? 3 : 2;
@@ -441,7 +452,7 @@ static void usb_send(const char *s) {
 
 /* vs USB: tell the PC which side it plays (tools/usb_stockfish.py, a Lichess bridge ...) */
 static void usb_opponent(void) {
-  if (cfg.mode != MODE_USB) return;
+  if (!VS_USB) return;
   usb_send(cfg.human ? "opponent white\r\n" : "opponent black\r\n");
 }
 
@@ -533,7 +544,7 @@ static void do_move(Move m) {
 
 static void undo(void) {
   if (!G->n) return;
-  if (cfg.mode == MODE_USB) { strcpy(status, "No undo vs USB"); return; }
+  if (VS_USB) { strcpy(status, "No undo vs USB"); return; }
   int plies = 1;
   if (cfg.mode == MODE_HC && G->n >= 2 && !is_human(G->hist[G->n - 1].side)) plies = 2;
   if (cfg.mode == MODE_HC && G->n == 1 && !is_human(G->hist[0].side)) plies = 1;
@@ -598,6 +609,14 @@ static void info_cb(int depth, int score, uint32_t nodes, Move best) {
 }
 
 static uint32_t think_time(uint32_t level_ms) {
+  if (cfg.mode == MODE_EUSB && usb_left >= 0) {          /* the online game's clock, from the PC */
+    int32_t left = usb_left - 1500;                      /* the USB and Lichess's lag */
+    int32_t t = left / 30 + usb_inc * 3 / 4;
+    if (t > left / 4) t = left / 4;
+    if (t < 50) t = 50;
+    if (level_ms && (uint32_t)t > level_ms) t = (int32_t)level_ms;
+    return (uint32_t)t;
+  }
   if (!cfg.tc) return level_ms;
   int32_t left = clock_left(CUR->side);
   int32_t t = left / 25 + (int32_t)TCS[cfg.tc].inc_s * 750;
@@ -707,7 +726,7 @@ static void cpu_move(void) {
 
 static void hint(void) {
   if (G->over || !G->nlegal) return;
-  if (cfg.mode == MODE_USB) { strcpy(status, "No hints vs USB"); return; }   /* the opponent may be a person online */
+  if (VS_USB) { strcpy(status, "No hints vs USB"); return; }   /* the opponent may be a person online */
   Result r = run_search(40, 1500, 0);
   hint_from = MFROM(r.best);
   hint_to = (MFLAGS(r.best) & F_CASTLE) ? castle_rook_sq(CUR, r.best) : MTO(r.best);
@@ -1034,15 +1053,15 @@ static void handle_softkey(int k) {
   case 6:  start_960_entry(); break;                                                 /* 960 */
   case 7:  cfg.tc = (int8_t)((cfg.tc + 1) % TC_CNT); clock_reset(); clock_update_live(); /* CLOCK */
            sprintf(status, "Clock %s", TCS[cfg.tc].name); break;
-  case 8:  cfg.human ^= 1; cfg.flip = cfg.human; if (cfg.mode != MODE_USB) cfg.mode = MODE_HC; sel = NOSQ;    /* SIDE */
+  case 8:  cfg.human ^= 1; cfg.flip = cfg.human; if (!VS_USB) cfg.mode = MODE_HC; sel = NOSQ;    /* SIDE */
            usb_opponent();
-           sprintf(status, "You play %s", cfg.human ? "Black" : "White"); break;
+           sprintf(status, cfg.mode == MODE_EUSB ? "CPU plays %s" : "You play %s", cfg.human ? "Black" : "White"); break;
   case 9:  save_game(DIR "/GAME.TXT"); break;                                         /* SAVE */
   case 10: strcpy(status, load_game(DIR "/GAME.TXT") ? "Loaded" : "No saved game"); break; /* LOAD */
   case 12: export_pgn(); break;                                                      /* PGN */
   case 13: cfg.mode = (int8_t)((cfg.mode + 1) % MODE_CNT); sel = NOSQ;              /* MODE */
            strcpy(status, MODE_NAME[cfg.mode]);
-           if (cfg.mode == MODE_USB) {
+           if (VS_USB) {
              if (!cfg.usb) {                                 /* vs USB needs the port: switch it on */
                if (!usbser_start("Chess 47")) { cfg.usb = 1; usbview_on(); usb_send("\r\nCHESS47 hello\r\n"); }
                else strcpy(status, "vs USB: connect USB");
@@ -1164,16 +1183,35 @@ static char rxl[48];
 static int rxn;
 static int usb_line(const char *l) {
   if (!strncmp(l, "msg ", 4)) { snprintf(status, sizeof status, "%.36s", l + 4); return 1; }
-  if (!strncmp(l, "newgame ", 8)) {                    /* the PC starts a game: "newgame white|black [FEN]" (your side) */
-    Pos p;
+  int bot = !strncmp(l, "botgame ", 8);
+  if (bot || !strncmp(l, "newgame ", 8)) {            /* the PC starts a game: "newgame white|black [FEN]" (your side), */
+    Pos p;                                             /* "botgame white|black [FEN]" (the engine's side, held until go) */
     const char *f = strchr(l + 8, ' ');
     chess960 = 0;
     if (!f || !pos_from_fen(&p, f + 1)) pos_start(&p);
-    cfg.mode = MODE_USB;
+    cfg.mode = bot ? MODE_EUSB : MODE_USB;
     cfg.human = (int8_t)(strncmp(l + 8, "black", 5) ? WHITE : BLACK);
     cfg.flip = cfg.human;
+    if (bot) { cfg.tc = 0; usb_hold = 1; usb_left = -1; usb_inc = 0; }   /* the time comes from the PC (clock) */
     sel = NOSQ;
     new_game_from(&p, -1);
+    return 1;
+  }
+  if (!strcmp(l, "go")) { usb_hold = 0; return 1; }   /* CPU vs USB: the board is caught up, the engine may move */
+  if (!strncmp(l, "level ", 6)) {                      /* "level 0..9" */
+    int v = atoi(l + 6);
+    if (v >= 0 && v <= 9) { cfg.level = (int8_t)v; sprintf(status, "Level %s", LEVELS[cfg.level].name); }
+    return 1;
+  }
+  if (!strncmp(l, "clock ", 6)) {                      /* "clock <engine ms left> <increment ms>" */
+    long t = 0, i = 0;
+    sscanf(l + 6, "%ld %ld", &t, &i);
+    usb_left = (int32_t)t; usb_inc = (int32_t)i;
+    return 0;
+  }
+  if (!strncmp(l, "end", 3) && (!l[3] || l[3] == ' ')) {   /* the game ended on the PC's side: "end <text>" */
+    if (!G->over) { G->over = 8; clk_live = 0; }
+    snprintf(end_txt, sizeof end_txt, "%.20s", l[3] ? l + 4 : "");
     return 1;
   }
   if (!strncmp(l, "play ", 5)) {                       /* a move of either side (the PC catching the board up) */
@@ -1182,9 +1220,9 @@ static int usb_line(const char *l) {
     do_move(m);
     return 1;
   }
-  if (cfg.mode != MODE_USB) return 0;
+  if (!VS_USB) return 0;
   if (G->over) { usb_send("over\r\n"); return 0; }
-  if (is_human(CUR->side)) { usb_send("notyourturn\r\n"); return 0; }
+  if (!usb_side(CUR->side)) { usb_send("notyourturn\r\n"); return 0; }
   Move m = str_to_move(CUR, l);
   if (!m) { char s[64]; snprintf(s, sizeof s, "illegal %.12s\r\n", l); usb_send(s); return 0; }
   do_move(m);                                          /* echoed to the PC: it confirms the move */
@@ -1217,7 +1255,8 @@ void program_main(void) {
       continue;
     }
     if (cfg.usb && usb_poll()) { redraw(); continue; }        /* a line from the PC (vs USB: its move) */
-    if (cfg.mode != MODE_USB && !ST(STAT_PGM_END) && !ST(STAT_SUSPENDED) && !G->over && !is_human(CUR->side) &&
+    if (cfg.mode != MODE_USB && !(cfg.mode == MODE_EUSB && (usb_hold || usb_side(CUR->side))) &&
+        !ST(STAT_PGM_END) && !ST(STAT_SUSPENDED) && !G->over && !is_human(CUR->side) &&
         !promo_mode && !num_mode && key_empty()) {
       cpu_move();
       redraw();

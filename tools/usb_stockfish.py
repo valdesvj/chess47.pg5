@@ -2,9 +2,9 @@
 """
 usb_stockfish.py - let Stockfish (on Linux) play against the DM42n over USB.
 
-The DMCP5 API can only SEND over USB serial (acm_puts); there is no receive
-call. So the calculator sends its moves, Stockfish answers here, and you type
-Stockfish's reply on the calculator keypad.
+The calculator sends its moves, Stockfish answers here, and you type
+Stockfish's reply on the calculator keypad (Chess 47 does not read the port yet).
+The screen frames Chess 47 also sends (for tools/dm42view.py) are skipped.
 
 Setup on the DM42n:  Chess 47 -> MODE "2 players", menu page 3 -> USB (ON).
 On Linux:            python3 tools/usb_stockfish.py [/dev/ttyACM0] [--elo 2000] [--time 2]
@@ -47,10 +47,20 @@ def main():
         board.push(r.move)
 
     print(f"Listening on {a.port} ... (Ctrl+C to quit)")
+    frame = False
     with open(a.port, "r", errors="ignore") as port:
         for raw in port:
             line = raw.strip()
             if not line:
+                continue
+            if line.endswith("LCD 400 240"):    # a screen frame (tools/dm42view.py): skip to its END
+                frame = True
+                continue
+            if frame:
+                frame = line != "END"
+                continue
+            if line.startswith("result"):
+                print(line)
                 continue
             if line.startswith("newgame"):
                 fen = line[len("newgame"):].strip()

@@ -98,22 +98,20 @@ Please read these as rough estimates:
   on hardware yet. The calculator's INFO screen shows the real nodes/s after a search.
 
 
-## Stockfish on Linux over USB
+## Stockfish on Linux over USB (both ways)
 
-The DMCP5 API can **send** over USB serial (`acm_puts`), but it has **no receive function**.
-I checked all 201 entries of the system call table. So the link is one-way:
-
-```
-DM42n  --(moves, "newgame <FEN>")-->  /dev/ttyACM0  -->  tools/usb_stockfish.py  -->  Stockfish
-                                                          (you type its reply on the keypad)
-```
+MODE (menu page 3) has **You vs USB**: the other side is played by a program on the PC, over the USB serial port
+(MODE switches USB on). SIDE chooses your colour. The calculator sends `newgame <FEN>`, `opponent white|black` and
+every move (`e2e4`); the PC answers with its move (`e7e5`), which the calculator checks, plays and sends back as the
+confirmation (`illegal ...` / `notyourturn` otherwise). `msg <text>` shows a text in the status line.
 
 ```bash
-pip install chess
-python3 tools/usb_stockfish.py /dev/ttyACM0 --elo 2000 --time 2 --side black
+sudo pacman -S stockfish python-chess
+python3 tools/usb_stockfish.py --elo 2000 --time 2      # finds the DM42n by name; Stockfish plays the USB side
+python3 tools/usb_stockfish.py --manual                  # the old way: you type Stockfish's move ("2 players")
 ```
 
-On the calculator, set MODE to "2 players" and turn USB on (page 3).
+The same mode is the way in for other opponents through the PC (a Lichess bridge, another calculator).
 
 ## The screen in your terminal
 

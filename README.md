@@ -93,14 +93,15 @@ and varied openings (random start positions for Chess960). Script: `test/run_mat
 |---|---:|---:|---|---:|---:|
 | level 9, USB power | 400 000 | 2200 | +9 =6 −5 | 60% | ~2270 (2145–2418) |
 | level 9, USB power | 400 000 | 2400 | +11 =3 −6 | 62% | ~2489 (2351–2663) |
-| **level 9, USB power: both** | 400 000 | 2200 + 2400 | 24.5 / 40 | 61% | **~2390 (±115)** |
+| level 9, USB power, **60 games** | 400 000 | 2400 | +36 =11 −13 | 69% | ~2540 (2462–2636) |
+| **level 9, USB power: all 100 games** | 400 000 | 2200 + 2400 | 66 / 100 | 66% | **~2480 (±75)** |
 | level 9, battery | 300 000 | 2200 | +9 =2 −9 | 50% | ~2200 (2046–2354) |
 | level 9, **Chess960**, USB power | 400 000 | 2200 | +12 =3 −5 | 68% | ~2330 (2192–2518) |
 
-The combined line is the maximum-likelihood rating over both matches. To repeat:
-`python3 test/match.py --level 9 --nodes 400000 --elo 2400 --games 60` (60 games: about ±70).
+The combined line is the maximum-likelihood rating over the three matches (100 games). To repeat:
+`python3 test/match.py --level 9 --nodes 400000 --elo 2400 --games 60`.
 
-**Roughly 1850 on battery at the middle levels, 2200–2300 on USB power, about 2400 at level 9 (2200 on battery).**
+**Roughly 1850 on battery at the middle levels, 2200–2300 on USB power, about 2480 at level 9 on USB power (about 2200 on battery).**
 
 Please read these as rough estimates:
 * 20 games per match means about ±100 Elo of statistical error.

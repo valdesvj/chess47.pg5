@@ -373,6 +373,13 @@ static const char *MENU[3][6] = {
 };
 static const char *PROMO_MENU[6] = { "Queen", "Rook", "Bishop", "Knight", "", "Cancel" };
 
+/* the LCD is sent by DMA in the background: wait until it is out before the buffer is touched again
+   (otherwise the next lcd_clear_buf, a move later, blanks the lower lines still being sent: the flicker of the demo) */
+static void lcd_show(void) {
+  lcd_refresh();
+  lcd_refresh_wait();
+}
+
 static void draw_menu(void) {
   lcd_draw_menu_keys(promo_mode ? PROMO_MENU : MENU[cfg.page]);
 }
@@ -382,7 +389,7 @@ static void redraw(void) {
   draw_board();
   draw_panel();
   draw_menu();
-  lcd_refresh();
+  lcd_show();
   if (cfg.usb) usbview_send();                 /* the screen to the PC (tools/dm42view.py) */
 }
 
@@ -517,7 +524,7 @@ static int poll_cb(void) {
   if (t - last_draw > 500) {
     last_draw = t;
     draw_clock();
-    lcd_refresh_lines(0, lh(t20) + 2);
+    lcd_refresh_lines(0, lh(t20) + 2); lcd_refresh_wait();
     reset_auto_off();
   }
   return stop;
@@ -537,7 +544,7 @@ static void info_cb(int depth, int score, uint32_t nodes, Move best) {
   fprintf(stderr, "info d%d %d nodes %lu %s\n", depth, score, (unsigned long)nodes, san);
 #endif
   draw_panel();
-  lcd_refresh();
+  lcd_show();
 }
 
 static uint32_t think_time(uint32_t level_ms) {
@@ -847,7 +854,7 @@ static void show_qr(void) {
     text_at(t24, 20, 100, "Game too long for QR", 0);
   }
   if (buf) free(buf);
-  lcd_refresh();
+  lcd_show();
   wait_exit();
 }
 
@@ -872,7 +879,7 @@ static void show_info(void) {
   text_at(t20, 4, y, "Keys: 8/2/4/6 7/9/1/3 move cursor", 0); y += h;
   text_at(t20, 4, y, "ENTER or 5 select/move  <- undo", 0); y += h;
   text_at(t20, 4, y, "EXIT cancel / move now  SHIFT EXIT off", 0);
-  lcd_refresh();
+  lcd_show();
   wait_exit();
 }
 
@@ -1063,7 +1070,7 @@ static void fatal(const char *msg) {
   text_at(t24, 10, 80, "CHESS 47", 1);
   text_at(t20, 10, 120, msg, 0);
   text_at(t20, 10, 150, "Load another program from DMCP menu", 0);
-  lcd_refresh();
+  lcd_show();
   for (;;) { wait_for_key_press(); }
 }
 
@@ -1157,7 +1164,7 @@ void program_main(void) {
           redraw();
         } else {
           draw_clock();
-          lcd_refresh_lines(0, lh(t20) + 2);
+          lcd_refresh_lines(0, lh(t20) + 2); lcd_refresh_wait();
         }
       }
     }

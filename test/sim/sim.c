@@ -32,6 +32,7 @@ static int real_time = 1;
 /* ---------------- LCD ---------------- */
 void lcd_clear_buf(void) { memset(fb, 0, sizeof fb); ntxt = 0; }
 void lcd_refresh(void) {}
+void lcd_refresh_wait(void) {}
 void lcd_refresh_lines(int ln, int cnt) { (void)ln; (void)cnt; }
 void lcd_forced_refresh(void) {}
 void lcd_set_buf_cleared(int v) { (void)v; }

@@ -19,6 +19,15 @@ On the DM42n: Chess 47 (any mode); the script switches it to "You vs USB" and se
   options: --clock 15 --inc 10 --rated --color white|black|random --port /dev/ttyACM1
 
 Board API games must be rapid, classical or correspondence (15+10 is rapid).
+
+As a BOT (--bot): the calculator's own engine plays ("CPU vs USB"), on a Lichess BOT account (a new account that has
+never played, upgraded once: curl -d '' https://lichess.org/api/bot/account/upgrade -H "Authorization: Bearer TOKEN";
+its token needs the scope bot:play). Keep that token apart: --token ~/.config/chess47/bot.token
+  python3 tools/lichess_board.py --bot --token ~/.config/chess47/bot.token            # accept challenges
+  python3 tools/lichess_board.py --bot --level 9 --challenge NAME                     # challenge someone
+  options: --level 0-9 (default 9), --speeds blitz,rapid,classical,correspondence
+The script sends the game's clock to the calculator before each of its moves; it thinks about 1/30 of its time.
+On the DM42n: Chess 47, USB on (page 3, F4); the script switches it to "CPU vs USB".
 """
 import argparse
 import glob
@@ -134,15 +143,26 @@ def main():
     ap.add_argument("--inc", type=int, default=10, help="increment, seconds (default 10)")
     ap.add_argument("--rated", action="store_true")
     ap.add_argument("--color", choices=["white", "black", "random"], default="random")
+    ap.add_argument("--bot", action="store_true", help="the calculator's engine plays (a Lichess BOT account)")
+    ap.add_argument("--level", type=int, default=9, choices=range(10), help="--bot: the engine's level (default 9)")
+    ap.add_argument("--speeds", default="blitz,rapid,classical,correspondence",
+                    help="--bot: the challenges accepted (default blitz,rapid,classical,correspondence)")
     a = ap.parse_args()
+    if a.bot and a.seek:
+        sys.exit("--seek: BOT accounts can't use the lobby; wait for challenges or use --challenge")
+    api = "/api/bot" if a.bot else "/api/board"
+    speeds = set(a.speeds.split(","))
 
     token = os.environ.get("LICHESS_TOKEN") or (open(a.token).read().strip() if os.path.exists(a.token) else "")
     if not token:
         sys.exit("no Lichess token: see the setup at the top of this file")
     port = a.port or (sorted(glob.glob("/dev/serial/by-id/*SwissMicros_DM42n*")) or ["/dev/ttyACM0"])[0]
     li = Lichess(token)
-    me = li.get("/api/account")["id"]
-    print(f"Lichess: {me}   calculator: {port}")
+    acct = li.get("/api/account")
+    me = acct["id"]
+    if a.bot and acct.get("title") != "BOT":
+        sys.exit(f"{me} is not a BOT account: see --bot at the top of this file")
+    print(f"Lichess: {me}{' (BOT, level %d)' % a.level if a.bot else ''}   calculator: {port}")
     fd = open_port(port)
     q = queue.Queue()
     threading.Thread(target=calc_lines, args=(fd, q), daemon=True).start()
@@ -162,6 +182,8 @@ def main():
     elif a.challenge:
         r = li.post("/api/challenge/" + a.challenge, dict(clk, rated=str(a.rated).lower()))
         print("Challenge sent to", a.challenge, "" if r.ok else "(refused)")
+    elif a.bot:
+        print("Waiting for challenges ...")
     else:
         print("Waiting for a game (start one on lichess.org) ...")
 
@@ -169,8 +191,11 @@ def main():
     me_white = True
     board = chess.Board()
     sent = set()                      # my moves sent to Lichess, not yet confirmed
+    inc = 0                           # the game's increment, ms
+    ENDS = {"mate": "Checkmate", "resign": "Resignation", "timeout": "Left the game", "outoftime": "Time out",
+            "draw": "Draw", "stalemate": "Stalemate", "aborted": "Aborted", "noStart": "No start"}
 
-    def sync(moves, status, wtime, btime):
+    def sync(moves, status, wtime, btime, winner=None):
         nonlocal board
         known = len(board.move_stack)
         for i, u in enumerate(moves):
@@ -179,13 +204,16 @@ def main():
             mv = chess.Move.from_uci(u)
             mine = board.turn == (chess.WHITE if me_white else chess.BLACK)
             if not mine:
+                if a.bot and wtime is not None:           # the engine's time left, before its turn
+                    send(f"clock {int(btime if me_white else wtime)} {int(inc)}")
                 send(board.uci(mv, chess960=False))       # the opponent's move: to the calculator
             sent.discard(u)
             board.push(mv)
         if status not in ("created", "started"):
-            send(f"msg {status.upper()}  {board.result(claim_draw=True)}")
+            res = ({"white": "1-0", "black": "0-1"}.get(winner) or ("1/2" if status in ("draw", "stalemate") else ""))
+            send(f"end {ENDS.get(status, status)} {res}".strip())
             print("Game over:", status)
-        elif wtime is not None:
+        elif wtime is not None and not a.bot:
             send(f"msg W {clock(wtime)}  B {clock(btime)}")
 
     while True:
@@ -206,31 +234,55 @@ def main():
                 continue
             sent.add(u)
             print("me:", board.san(mv))
-            if not li.post(f"/api/board/game/{game}/move/{u}").ok:
+            if not li.post(f"{api}/game/{game}/move/{u}").ok:
                 sent.discard(u)
                 send("msg Lichess refused the move")
+        elif tag == "event" and v.get("type") == "challenge" and a.bot:
+            c = v["challenge"]
+            if c["challenger"]["id"] == me:
+                continue                                    # our own challenge
+            why = ("later" if game is not None else "standard" if c["variant"]["key"] != "standard"
+                   else "timeControl" if c["speed"] not in speeds else None)
+            who = f"{c['challenger']['name']} ({c['speed']}, {c['variant']['key']})"
+            if why:
+                li.post(f"/api/challenge/{c['id']}/decline", {"reason": why})
+                print("Declined", who, why)
+            else:
+                li.post(f"/api/challenge/{c['id']}/accept")
+                print("Accepted", who)
         elif tag == "event" and v.get("type") == "gameStart" and game is None:
             game = v["game"].get("gameId") or v["game"].get("id")
             print("Game:", f"{API}/{game}")
-            li.stream(f"/api/board/game/stream/{game}", q, "game")
+            li.stream(f"{api}/game/stream/{game}", q, "game")
         elif tag == "game" and v.get("type") == "gameFull":
             me_white = v.get("white", {}).get("id") == me
             opp = v["black" if me_white else "white"]
             name = opp.get("name") or ("AI level %s" % opp.get("aiLevel", "?"))
             fen = v.get("initialFen", "startpos")
             board = chess.Board() if fen == "startpos" else chess.Board(fen)
-            send(f"newgame {'white' if me_white else 'black'}" + ("" if fen == "startpos" else " " + fen))
+            inc = (v.get("clock") or {}).get("increment", 0)
+            if a.bot:
+                send(f"level {a.level}")
+            send(f"{'botgame' if a.bot else 'newgame'} {'white' if me_white else 'black'}"
+                 + ("" if fen == "startpos" else " " + fen))
             time.sleep(0.3)
             st = v["state"]
             moves = st["moves"].split() if st["moves"] else []
             for u in moves:                                  # catch the calculator up
                 send("play " + u)
                 board.push_uci(u)
-            print(f"You play {'white' if me_white else 'black'} against {name} ({opp.get('rating', '-')})")
+            side = 'white' if me_white else 'black'
+            print(f"{'Chess 47 plays' if a.bot else 'You play'} {side} against {name} ({opp.get('rating', '-')})")
             send(f"msg vs {name} {opp.get('rating', '')}".strip())
-            sync(moves, st["status"], st.get("wtime"), st.get("btime"))
+            if a.bot:
+                if st.get("wtime") is not None:
+                    send(f"clock {int(st['wtime'] if me_white else st['btime'])} {int(inc)}")
+                send("go")                                   # the engine may move now
+                li.post(f"/api/bot/game/{game}/chat", {"room": "player", "text":
+                        f"Chess 47 (level {a.level}) thinking on a SwissMicros DM42n calculator. Good luck!"})
+            sync(moves, st["status"], st.get("wtime"), st.get("btime"), st.get("winner"))
         elif tag == "game" and v.get("type") == "gameState":
-            sync(v["moves"].split() if v["moves"] else [], v["status"], v.get("wtime"), v.get("btime"))
+            sync(v["moves"].split() if v["moves"] else [], v["status"], v.get("wtime"), v.get("btime"), v.get("winner"))
         elif tag == "game-end":
             print("The game is over. Ctrl+C to quit, or start another game on lichess.org")
             game = None

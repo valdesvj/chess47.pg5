@@ -57,7 +57,7 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
   NEW then deals another random 960 position.
 * **CLOCK**: OFF, 1+0, 3+2, 5+0, 10+0, 15+10, 30+0, 60+0, shown at the top left.
   The clock pauses while the calculator is off. The CPU manages its own time.
-* **MODE**: You vs CPU / 2 players / CPU vs CPU demo. **SIDE** swaps colours.
+* **MODE**: You vs CPU / 2 players / CPU vs CPU demo / You vs USB / CPU vs USB (below). **SIDE** swaps colours.
 * **SAVE/LOAD**: `/CHESS47/GAME.TXT`. **PGN** writes `/CHESS47/GAME.PGN`
   (with `[Variant "Chess960"]` and `[FEN]` tags when needed).
 * **QR**: shows the game as a QR code. Scan it with your phone and paste it into the
@@ -140,6 +140,31 @@ python3 tools/lichess_board.py --ai 3           # against Lichess's computer (le
 python3 tools/lichess_board.py --seek           # a casual 15+10 game against a person
 python3 tools/lichess_board.py --challenge NAME # a friend
 ```
+
+### Lichess: Chess 47 as a BOT (the calculator thinks)
+
+**CPU vs USB**: the calculator's own engine plays one side and the USB the other. `lichess_board.py --bot` puts it on
+a Lichess **BOT account**: it accepts challenges (or sends one), the calculator thinks every move and the bridge sends
+it to Lichess. Before each of its moves the PC sends the game's clock (`clock <ms left> <increment ms>`); the engine
+uses about 1/30 of its time, never more than its level's time (level 9: 30 s). The PC also sends `level N`,
+`botgame white|black [FEN]` (the engine's side), `play` lines to catch up, `go` (the engine may move) and
+`end <reason> <result>` when the game ends on Lichess (resignation, time, abort).
+
+A BOT account is a **new** Lichess account that has never played a game, upgraded once (it can't be undone, so not
+your own account), with a token of the scope **bot:play**:
+
+```bash
+echo 'lip_...' > ~/.config/chess47/bot.token && chmod 600 ~/.config/chess47/bot.token
+curl -d '' https://lichess.org/api/bot/account/upgrade -H "Authorization: Bearer $(cat ~/.config/chess47/bot.token)"
+# on the DM42n: Chess 47, USB on (page 3, F4)
+python3 tools/lichess_board.py --bot --token ~/.config/chess47/bot.token                  # accept challenges
+python3 tools/lichess_board.py --bot --token ~/.config/chess47/bot.token --challenge NAME  # challenge someone
+#   --level 0-9 (default 9)   --speeds blitz,rapid,classical,correspondence (the challenges accepted)
+```
+
+Keep the DM42n on USB power (the engine is about twice as fast). Bullet is declined by default: the USB and the
+network take about a second a move. For a bot without the calculator (the same engine on the PC), use
+`build/chess47-uci` with [lichess-bot](https://github.com/lichess-bot-devs/lichess-bot).
 
 
 ## The screen in your terminal

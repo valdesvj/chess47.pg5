@@ -31,7 +31,7 @@ SIZE    = arm-none-eabi-size
 C_DEFS  += -D__weak="__attribute__((weak))" -D__packed="__attribute__((__packed__))"
 CPUFLAGS += -mthumb -march=armv7e-m -mfloat-abi=hard -mfpu=fpv4-sp-d16
 
-CFLAGS  = $(CPUFLAGS) $(C_DEFS) $(C_INCLUDES) -Wall -fdata-sections -ffunction-sections
+CFLAGS  = -std=gnu11 $(CPUFLAGS) $(C_DEFS) $(C_INCLUDES) -Wall -fdata-sections -ffunction-sections
 CFLAGS += -Wno-misleading-indentation
 ifeq ($(DEBUG), 1)
 CFLAGS += -O0 -g -DDEBUG
@@ -74,7 +74,7 @@ $(BUILD_DIR):
 
 # PC test: perft + search
 test: test/perft.c src/engine.c src/engine.h
-	gcc -O2 -Wall -o $(BUILD_DIR)/perft test/perft.c src/engine.c && $(BUILD_DIR)/perft
+	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/perft test/perft.c src/engine.c && $(BUILD_DIR)/perft
 
 clean:
 	-rm -fR .dep $(BUILD_DIR)

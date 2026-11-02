@@ -2,6 +2,7 @@
  * ./acm.out (tools/dm42view.py acm.out shows it); what the "PC" sends comes from ./acm.in, one line each time the
  * calculator has sent a move (a PC answering it: the vs USB mode). */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "usbser.h"
 
@@ -26,7 +27,7 @@ int usbser_read(void *p, int max) {
   static FILE *in;
   static int done;
   char line[128];
-  if (!f || done || !answer) return 0;
+  if (!f || done || (!answer && !getenv("ACM_FREE"))) return 0;
   if (!in && !(in = fopen("acm.in", "r"))) { done = 1; return 0; }
   if (!fgets(line, sizeof line, in)) { done = 1; return 0; }
   answer = 0;

@@ -707,6 +707,7 @@ static void cpu_move(void) {
 
 static void hint(void) {
   if (G->over || !G->nlegal) return;
+  if (cfg.mode == MODE_USB) { strcpy(status, "No hints vs USB"); return; }   /* the opponent may be a person online */
   Result r = run_search(40, 1500, 0);
   hint_from = MFROM(r.best);
   hint_to = (MFLAGS(r.best) & F_CASTLE) ? castle_rook_sq(CUR, r.best) : MTO(r.best);
@@ -1163,6 +1164,24 @@ static char rxl[48];
 static int rxn;
 static int usb_line(const char *l) {
   if (!strncmp(l, "msg ", 4)) { snprintf(status, sizeof status, "%.36s", l + 4); return 1; }
+  if (!strncmp(l, "newgame ", 8)) {                    /* the PC starts a game: "newgame white|black [FEN]" (your side) */
+    Pos p;
+    const char *f = strchr(l + 8, ' ');
+    chess960 = 0;
+    if (!f || !pos_from_fen(&p, f + 1)) pos_start(&p);
+    cfg.mode = MODE_USB;
+    cfg.human = (int8_t)(strncmp(l + 8, "black", 5) ? WHITE : BLACK);
+    cfg.flip = cfg.human;
+    sel = NOSQ;
+    new_game_from(&p, -1);
+    return 1;
+  }
+  if (!strncmp(l, "play ", 5)) {                       /* a move of either side (the PC catching the board up) */
+    Move m = G->over ? 0 : str_to_move(CUR, l + 5);
+    if (!m) { char s[64]; snprintf(s, sizeof s, "illegal %.12s\r\n", l + 5); usb_send(s); return 0; }
+    do_move(m);
+    return 1;
+  }
   if (cfg.mode != MODE_USB) return 0;
   if (G->over) { usb_send("over\r\n"); return 0; }
   if (is_human(CUR->side)) { usb_send("notyourturn\r\n"); return 0; }

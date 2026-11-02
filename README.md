@@ -111,7 +111,22 @@ python3 tools/usb_stockfish.py --elo 2000 --time 2      # finds the DM42n by nam
 python3 tools/usb_stockfish.py --manual                  # the old way: you type Stockfish's move ("2 players")
 ```
 
-The same mode is the way in for other opponents through the PC (a Lichess bridge, another calculator).
+### Lichess: the DM42n as your board
+
+`tools/lichess_board.py` connects "You vs USB" to Lichess's **Board API**: you play your moves on the calculator, they
+go to Lichess as yours, and your opponent's come back to the board. The PC also sends `newgame white|black [FEN]`
+(the calculator starts that game, your side at the bottom), `play <move>` (to catch up a game in progress) and
+`msg` lines (the opponent and the clocks). Hints are off in "You vs USB": in games as yourself only you choose the
+moves (Lichess fair play; engines play only on BOT accounts).
+
+```bash
+mkdir -p ~/.config/chess47      # a token with the scope "Play games with the board API" (board:play):
+echo 'lip_...' > ~/.config/chess47/lichess.token && chmod 600 ~/.config/chess47/lichess.token
+python3 tools/lichess_board.py --ai 3           # against Lichess's computer (levels 1-8)
+python3 tools/lichess_board.py --seek           # a casual 15+10 game against a person
+python3 tools/lichess_board.py --challenge NAME # a friend
+```
+
 
 ## The screen in your terminal
 

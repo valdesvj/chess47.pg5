@@ -18,7 +18,7 @@ C_INCLUDES += -Idmcp -Isrc
 C_SOURCES  += dmcp/sys/pgm_syscalls.c
 ASM_SOURCES = dmcp/startup_pgm.s
 
-C_SOURCES += src/main.c src/engine.c
+C_SOURCES += src/main.c src/engine.c src/usbview.c
 
 #######################################
 # Toolchain

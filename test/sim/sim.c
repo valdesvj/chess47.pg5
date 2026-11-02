@@ -104,7 +104,16 @@ int  usb_powered(void) { return 1; }
 void usb_acm_on(void) {}
 int  usb_is_on(void) { return 1; }
 void usb_turn_off(void) {}
-void acm_puts(const char *s) { fprintf(stderr, "[USB] %s", s); }
+static FILE *acm;
+void acm_puts(const char *s) { if (!acm) acm = fopen("acm.out", "w"); fputs(s, acm); fflush(acm); }
+/* the DMCP line buffer with its own oddities (offset, mirrored, LSB first, inverted), for usbview.c to learn */
+uint8_t *lcd_line_addr(int y) {
+  static uint8_t lb[LCD_Y][54];
+  memset(lb[y], 0xFF, 54);
+  for (int x = 0; x < LCD_X; x++)
+    if (fb[y][x]) { int X = LCD_X - 1 - x; lb[y][2 + X / 8] &= (uint8_t)~(1u << (X % 8)); }
+  return lb[y];
+}
 void reset_auto_off(void) {}
 void rtc_wakeup_delay(void) {}
 void rtc_read(tm_t *tm, dt_t *dt) { memset(tm, 0, sizeof *tm); dt->year = 2026; dt->month = 11; dt->day = 2; }

@@ -6,6 +6,8 @@
     python3 tools/dm42view.py --blocks            # half blocks: 1 character = 1 x 2 pixels (needs 400 columns)
     python3 tools/dm42view.py --png shots/        # also save every screen as a PNG (needs Pillow)
     python3 tools/dm42view.py --once --png .      # one screen, then exit
+    python3 tools/dm42view.py --quiet --latest /tmp/dm42.png &  feh -R 0.5 /tmp/dm42.png
+                                                  # a live picture instead of text: one PNG, rewritten each screen
 
 The frames are text: "NAV47 LCD 400 240" (or "CHESS47 LCD ..."), 240 lines of 100 hex digits (1 = ink), "END".
 On Linux the user needs access to the port: sudo usermod -aG uucp $USER (Arch) or dialout (Debian), then log in again.
@@ -81,32 +83,40 @@ def main():
     ap.add_argument('--png', help='save every frame as a PNG in this folder')
     ap.add_argument('--scale', type=int, default=3, help='PNG pixel size (default 3)')
     ap.add_argument('--once', action='store_true', help='one frame, then exit')
+    ap.add_argument('--latest', help='write each frame to this one PNG file (for an image viewer that reloads it)')
+    ap.add_argument('--quiet', action='store_true', help='no picture in the terminal (with --png / --latest)')
     a = ap.parse_args()
     x0, y0, w, h = map(int, a.zoom.split(',')) if a.zoom else (0, 0, W, H)
     n = 0
     try:
         for px in frames(a.port):
             n += 1
-            cols, lines = shutil.get_terminal_size((200, 62))
-            if a.blocks:
-                art = blocks(px, x0, y0, w, h)
-            else:
-                scale = max(1, min((cols * 2) // w, ((lines - 2) * 4) // h))
-                art = braille(px, x0, y0, w, h, scale)
-            sys.stdout.write('\x1b[H\x1b[2J' + '\n'.join(art) + '\n' + time.strftime('%H:%M:%S') + '  frame %d' % n + '\n')
+            if not a.quiet:
+                cols, lines = shutil.get_terminal_size((200, 62))
+                if a.blocks:
+                    art = blocks(px, x0, y0, w, h)
+                else:
+                    scale = max(1, min((cols * 2) // w, ((lines - 2) * 4) // h))
+                    art = braille(px, x0, y0, w, h, scale)
+                sys.stdout.write('\x1b[H\x1b[2J' + '\n'.join(art) + '\n')
+            sys.stdout.write(time.strftime('%H:%M:%S') + '  frame %d\n' % n)
             sys.stdout.flush()
-            if a.png:
+            if a.png or a.latest:
                 from PIL import Image
-                os.makedirs(a.png, exist_ok=True)
                 img = Image.new('RGB', (W, H), (223, 230, 214))
                 p = img.load()
                 for y in range(H):
                     for x in range(W):
                         if px[y][x]:
                             p[x, y] = (30, 34, 32)
-                img = img.resize((W * a.scale, H * a.scale), Image.NEAREST)
-                name = os.path.join(a.png, time.strftime('dm42_%Y%m%d_%H%M%S') + '_%03d.png' % n)
-                img.save(name)
+                img = img.crop((x0, y0, x0 + w, y0 + h)).resize((w * a.scale, h * a.scale), Image.NEAREST)
+                if a.png:
+                    os.makedirs(a.png, exist_ok=True)
+                    img.save(os.path.join(a.png, time.strftime('dm42_%Y%m%d_%H%M%S') + '_%03d.png' % n))
+                if a.latest:
+                    tmp = a.latest + '.tmp.png'
+                    img.save(tmp)
+                    os.replace(tmp, a.latest)      # whole files only: the viewer never reads half a picture
             if a.once:
                 break
     except KeyboardInterrupt:

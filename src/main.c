@@ -16,6 +16,7 @@
 
 #include "engine.h"
 #include "usbview.h"
+#include "usbser.h"
 #include "pieces.h"
 
 /* ------------------------------------------------------------------ */
@@ -320,14 +321,16 @@ static void draw_panel(void) {
   y += h;
 
   /* status line */
+  /* the game's state first (the result, check), then the engine's line: the search used to hide "check" */
+  int inv = 0;
   if (num_mode) sprintf(s, "960 #: %s_", num_buf);
   else if (promo_mode) sprintf(s, "Promote to?");
+  else if (G->over) { strcpy(s, result_text(G->over, CUR->side)); inv = 1; }
+  else if (in_check(CUR)) { sprintf(s, "CHECK! %s to move", CUR->side ? "Black" : "White"); inv = 1; }
   else if (status[0]) strcpy(s, status);
-  else if (G->over) strcpy(s, result_text(G->over, CUR->side));
-  else if (in_check(CUR)) sprintf(s, "%s in check!", CUR->side ? "Black" : "White");
   else sprintf(s, "%s to move", CUR->side ? "Black" : "White");
   lcd_fill_rect(0, y, BX - 1, h, 0);
-  text_at(t20, 2, y, s, G->over != 0);
+  text_at(t20, 2, y, s, inv);
   y += h + 2;
   lcd_fill_rect(2, y, PANEL_W - 4, 1, 1);
   y += 3;
@@ -380,6 +383,37 @@ static void lcd_show(void) {
   lcd_refresh_wait();
 }
 
+/* the end of the game, in a box on the board: what happened, why, the result */
+static void draw_banner(void) {
+  if (!G->over) return;
+  const char *L[3] = { "", "", "" };
+  int loser = CUR->side;
+  const char *win = loser == WHITE ? "Black wins  0-1" : "White wins  1-0";
+  switch (G->over) {
+  case 1: L[0] = "CHECKMATE"; L[2] = win; break;
+  case 2: L[0] = "STALEMATE"; L[1] = "no legal move"; L[2] = "Draw  1/2-1/2"; break;
+  case 3: L[0] = "DRAW"; L[1] = "50-move rule"; L[2] = "1/2-1/2"; break;
+  case 4: L[0] = "DRAW"; L[1] = "no mating material"; L[2] = "1/2-1/2"; break;
+  case 5: L[0] = "DRAW"; L[1] = "3-fold repetition"; L[2] = "1/2-1/2"; break;
+  case 6: L[0] = "TIME"; L[1] = loser == WHITE ? "White's flag fell" : "Black's flag fell"; L[2] = win; break;
+  case 7: L[0] = "RESIGNS"; L[1] = loser == WHITE ? "White resigns" : "Black resigns"; L[2] = win; break;
+  default: return;
+  }
+  int h24 = lh(t24), h20 = lh(t20), n = L[1][0] ? 3 : 2;
+  int bh = h24 + (n - 1) * h20 + 12, bw = BOARD_PX - 8;
+  int x0 = BX + 4, y0 = BY + (BOARD_PX - bh) / 2;
+  lcd_fill_rect((uint32_t)x0 - 2, (uint32_t)y0 - 2, (uint32_t)bw + 4, (uint32_t)bh + 4, 0);   /* a white rim */
+  lcd_fill_rect((uint32_t)x0, (uint32_t)y0, (uint32_t)bw, (uint32_t)bh, 1);
+  int y = y0 + 5;
+  text_at(t24, x0 + (bw - lcd_textWidth(t24, L[0])) / 2, y, L[0], 1);
+  y += h24;
+  for (int i = 1; i < 3; i++) {
+    if (!L[i][0]) continue;
+    text_at(t20, x0 + (bw - lcd_textWidth(t20, L[i])) / 2, y, L[i], 1);
+    y += h20;
+  }
+}
+
 static void draw_menu(void) {
   lcd_draw_menu_keys(promo_mode ? PROMO_MENU : MENU[cfg.page]);
 }
@@ -387,6 +421,7 @@ static void draw_menu(void) {
 static void redraw(void) {
   lcd_clear_buf();
   draw_board();
+  draw_banner();
   draw_panel();
   draw_menu();
   lcd_show();
@@ -399,8 +434,8 @@ static void redraw(void) {
 static void refresh_legal(void) { G->nlegal = gen_legal(CUR, G->legal); }
 
 static void usb_send(const char *s) {
-  if (!cfg.usb || !usb_is_on()) return;
-  acm_puts(s);
+  if (!cfg.usb) return;
+  usbser_puts(s);
 }
 
 static void clock_reset(void) {
@@ -448,6 +483,11 @@ static void check_over(void) {
     G->over = st;
     clk_live = 0;
     beep(st == 1 ? 440 : 660, 250);
+    if (cfg.usb) {
+      char s[48];
+      sprintf(s, "result %s %s\r\n", result_tag(), result_text(st, CUR->side));
+      usb_send(s);
+    }
   }
 }
 
@@ -519,6 +559,7 @@ static int poll_cb(void) {
     if (deferred_key < 0) deferred_key = k;                 /* handle it after the move */
     if (cfg.mode == MODE_CC) stop = 1;                      /* demo: any key interrupts */
   }
+  usbser_task();                                            /* the USB keeps answering the PC during the search */
   uint32_t t = now_ms();
   if (clk_live && clock_left(CUR->side) <= 0) stop = 1;
   if (t - last_draw > 500) {
@@ -993,9 +1034,10 @@ static void handle_softkey(int k) {
   case 14: show_qr(); break;                                                         /* QR */
   case 15: cfg.usb ^= 1;                                                             /* USB */
            if (cfg.usb) {
-             if (usb_powered()) { usb_acm_on(); usbview_on(); strcpy(status, "USB serial ON"); usb_send("\r\nCHESS47 hello\r\n"); }
-             else { cfg.usb = 0; strcpy(status, "Connect USB first"); }
-           } else { usbview_off(); usb_turn_off(); strcpy(status, "USB serial OFF"); }
+             int r = usbser_start("Chess 47");               /* our own serial port (TinyUSB) */
+             if (!r) { usbview_on(); strcpy(status, "USB serial ON"); usb_send("\r\nCHESS47 hello\r\n"); }
+             else { cfg.usb = 0; strcpy(status, r == -1 ? "Connect USB first" : "No memory for USB"); }
+           } else { usbview_off(); usbser_stop(); strcpy(status, "USB serial OFF"); }
            break;
   case 16: show_info(); break;                                                       /* INFO */
   case 5: case 11: case 17: cfg.page = (int8_t)((cfg.page + 1) % 3); break;          /* >> */
@@ -1117,7 +1159,9 @@ void program_main(void) {
       continue;
     }
 
-    if ((ST(STAT_PGM_END) && ST(STAT_SUSPENDED)) || (!ST(STAT_PGM_END) && key_empty())) {
+    if (cfg.usb && !ST(STAT_PGM_END) && key_empty())
+      usbser_idle(250);                                    /* the USB runs: no sleep (it would stop the USB) */
+    else if ((ST(STAT_PGM_END) && ST(STAT_SUSPENDED)) || (!ST(STAT_PGM_END) && key_empty())) {
       if (clk_live) sys_timer_start(0, 250);
       CLR_ST(STAT_RUNNING);
       sys_sleep();
@@ -1128,6 +1172,7 @@ void program_main(void) {
         /* going off: pause clock, autosave, draw off image */
         if (clk_live) { clk[CUR->side] = clock_left(CUR->side); clk_live = 0; }
         save_game(DIR "/AUTO.TXT");
+        if (cfg.usb) { usbview_off(); usbser_stop(); cfg.usb = 0; }
         lcd_set_buf_cleared(0);
         draw_power_off_image(1);
         LCD_power_off(0);

@@ -14,11 +14,17 @@ PYTHON ?= python3
 ######################################
 # Sources
 ######################################
-C_INCLUDES += -Idmcp -Isrc
+C_INCLUDES += -Idmcp -Isrc -Isrc/usb -Ithird_party/tinyusb/src
 C_SOURCES  += dmcp/sys/pgm_syscalls.c
 ASM_SOURCES = dmcp/startup_pgm.s
 
 C_SOURCES += src/main.c src/engine.c src/usbview.c
+
+# the USB serial port (our own, with TinyUSB: the firmware's usb_acm_on leaves the port disconnected)
+TUSB = third_party/tinyusb/src
+C_SOURCES += src/usb/usbser.c src/usb/usb_desc.c \
+             $(TUSB)/tusb.c $(TUSB)/common/tusb_fifo.c $(TUSB)/device/usbd.c $(TUSB)/class/cdc/cdc_device.c \
+             $(TUSB)/portable/synopsys/dwc2/dcd_dwc2.c $(TUSB)/portable/synopsys/dwc2/dwc2_common.c
 
 #######################################
 # Toolchain

@@ -64,6 +64,13 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
   lichess analysis board.
 * **USB**: turns the USB serial port on. Every move is sent as UCI text (see below), and every screen as a frame for `tools/dm42view.py` (the screen in your terminal).
 
+## Messages
+
+The status line always shows the game's state first: **CHECK!** (inverted) as soon as a king is attacked, even
+while the computer thinks. At the end a box on the board says what happened, why, and the result:
+**CHECKMATE**, **STALEMATE**, **DRAW** (50-move rule, no mating material, 3-fold repetition), **TIME** (a flag
+fell), **RESIGNS**. With USB on, the result also goes to the PC as a `result 1-0 ...` line.
+
 ## Strength (measured against Stockfish)
 
 Chess 47 (PC build, same engine) against **Stockfish 16** with `UCI_LimitStrength`
@@ -118,8 +125,11 @@ python3 tools/dm42view.py                 # Braille dots in the terminal
 python3 tools/dm42view.py --png shots/    # and a PNG of every screen
 ```
 
-Chess 47 learns how the firmware stores the LCD lines when USB is turned on (it sets a pixel and looks which bit
-changes), so it relies only on `usb_acm_on`, `acm_puts` and `lcd_line_addr`.
+The firmware's own `usb_acm_on()` leaves the USB port disconnected (the DM42n's USB core stays in soft-disconnect),
+so Chess 47 drives the USB itself with **TinyUSB** (`src/usb/`, `third_party/tinyusb`, MIT): one CDC serial port,
+`/dev/ttyACM0`, which can also **receive** (for a two-way Stockfish link later). While USB is on the calculator does
+not sleep (it would stop the USB). Chess 47 learns how the firmware stores the LCD lines (it sets a pixel and looks
+which bit changes).
 
 ## Build
 
@@ -138,7 +148,7 @@ then packs the `.pg5`: program size word plus SHA1 trailer.
 ```bash
 # simulator: real main.c + engine.c against a fake DMCP layer, renders the LCD
 gcc -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' \
-    -Itest/sim -Isrc -o build/sim test/sim/sim.c src/main.c src/engine.c src/usbview.c
+    -Itest/sim -Isrc -Isrc/usb -o build/sim test/sim/sim.c src/main.c src/engine.c src/usbview.c test/sim/usbser_sim.c
 cd build && ./sim 5 8 8 5 WAIT:2000 SNAP:shot && python3 ../test/sim/render.py shot shot.png
 
 # UCI engine (for cutechess, Arena, or the Elo test)

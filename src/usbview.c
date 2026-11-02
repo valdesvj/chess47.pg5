@@ -1,4 +1,4 @@
-/* usbview.c - Chess 47: sends the LCD to the PC over USB (DMCP usb_acm_on / acm_puts), one text frame per screen:
+/* usbview.c - Chess 47: sends the LCD to the PC over USB (our own serial port, src/usb/usbser.c), one text frame per screen:
  *   CHESS47 LCD 400 240\n   240 lines of 100 hex digits (x = 0 first, most significant bit first, 1 = ink)   END\n
  * The DMCP line buffer's layout (byte order, bit order, inverted data) is learnt at start by setting one pixel and
  * looking which bit changes, so it does not depend on undocumented details. tools/dm42view.py shows the frames (the same viewer as NAV47).
@@ -7,6 +7,7 @@
 #include <dmcp.h>
 #include <string.h>
 #include "usbview.h"
+#include "usbser.h"
 
 #define SCAN 54                       /* look at the whole line buffer (command and dummy bytes too) */
 static int on, ok;
@@ -38,15 +39,15 @@ static void learn(void) {
   ok = (kstep == 1 || kstep == -1) && (bstep == 1 || bstep == -1);
 }
 
-void usbview_on(void) { on = 1; learn(); }       /* main.c switches the port (usb_acm_on) */
+void usbview_on(void) { on = 1; learn(); }       /* main.c switches the port on (usbser_start) */
 void usbview_off(void) { on = 0; }
 int usbview_is_on(void) { return on; }
 
 void usbview_send(void) {
-  if (!on || !ok) return;
+  if (!on || !ok || !usbser_connected()) return;
   static const char HEX[] = "0123456789ABCDEF";
   char line[LCD_X / 4 + 2];
-  acm_puts("CHESS47 LCD 400 240\n");
+  usbser_puts("CHESS47 LCD 400 240\n");
   for (int y = 0; y < LCD_Y; y++) {
     const uint8_t *p = lcd_line_addr(y);
     for (int c = 0; c < LCD_X / 8; c++) {
@@ -61,7 +62,7 @@ void usbview_send(void) {
     }
     line[LCD_X / 4] = '\n';
     line[LCD_X / 4 + 1] = 0;
-    acm_puts(line);
+    usbser_puts(line);
   }
-  acm_puts("END\n");
+  usbser_puts("END\n");
 }

@@ -87,7 +87,20 @@ and varied openings (random start positions for Chess960). Script: `test/run_mat
 | **Chess960**, USB power | 100 000 | 2200 | +4 =7 −9 | 38% | ~2110 |
 | level 9 (30 s), USB power | 400 000 | 2400 | +7 =8 −5 | 55% | ~2435 |
 
-**Roughly 1850 on battery, 2200–2300 on USB power, about 2400 at level 9.**
+**Level 9 again (November 2026, `--level 9`, Stockfish on Arch Linux):**
+
+| Imitates on the DM42n | Nodes/move | vs Stockfish | Result | Score | Est. Elo (95%) |
+|---|---:|---:|---|---:|---:|
+| level 9, USB power | 400 000 | 2200 | +9 =6 −5 | 60% | ~2270 (2145–2418) |
+| level 9, USB power | 400 000 | 2400 | +11 =3 −6 | 62% | ~2489 (2351–2663) |
+| **level 9, USB power: both** | 400 000 | 2200 + 2400 | 24.5 / 40 | 61% | **~2390 (±115)** |
+| level 9, battery | 300 000 | 2200 | +9 =2 −9 | 50% | ~2200 (2046–2354) |
+| level 9, **Chess960**, USB power | 400 000 | 2200 | +12 =3 −5 | 68% | ~2330 (2192–2518) |
+
+The combined line is the maximum-likelihood rating over both matches. To repeat:
+`python3 test/match.py --level 9 --nodes 400000 --elo 2400 --games 60` (60 games: about ±70).
+
+**Roughly 1850 on battery at the middle levels, 2200–2300 on USB power, about 2400 at level 9 (2200 on battery).**
 
 Please read these as rough estimates:
 * 20 games per match means about ±100 Elo of statistical error.

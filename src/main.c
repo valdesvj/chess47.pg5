@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "engine.h"
+#include "usbview.h"
 #include "pieces.h"
 
 /* ------------------------------------------------------------------ */
@@ -382,6 +383,7 @@ static void redraw(void) {
   draw_panel();
   draw_menu();
   lcd_refresh();
+  if (cfg.usb) usbview_send();                 /* the screen to the PC (tools/dm42view.py) */
 }
 
 /* ------------------------------------------------------------------ */
@@ -984,9 +986,9 @@ static void handle_softkey(int k) {
   case 14: show_qr(); break;                                                         /* QR */
   case 15: cfg.usb ^= 1;                                                             /* USB */
            if (cfg.usb) {
-             if (usb_powered()) { usb_acm_on(); strcpy(status, "USB serial ON"); usb_send("\r\nCHESS47 hello\r\n"); }
+             if (usb_powered()) { usb_acm_on(); usbview_on(); strcpy(status, "USB serial ON"); usb_send("\r\nCHESS47 hello\r\n"); }
              else { cfg.usb = 0; strcpy(status, "Connect USB first"); }
-           } else { usb_turn_off(); strcpy(status, "USB serial OFF"); }
+           } else { usbview_off(); usb_turn_off(); strcpy(status, "USB serial OFF"); }
            break;
   case 16: show_info(); break;                                                       /* INFO */
   case 5: case 11: case 17: cfg.page = (int8_t)((cfg.page + 1) % 3); break;          /* >> */

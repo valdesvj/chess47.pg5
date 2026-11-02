@@ -62,7 +62,7 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
   (with `[Variant "Chess960"]` and `[FEN]` tags when needed).
 * **QR**: shows the game as a QR code. Scan it with your phone and paste it into the
   lichess analysis board.
-* **USB**: turns the USB serial port on. Every move is sent as UCI text (see below).
+* **USB**: turns the USB serial port on. Every move is sent as UCI text (see below), and every screen as a frame for `tools/dm42view.py` (the screen in your terminal).
 
 ## Strength (measured against Stockfish)
 
@@ -108,6 +108,19 @@ python3 tools/usb_stockfish.py /dev/ttyACM0 --elo 2000 --time 2 --side black
 
 On the calculator, set MODE to "2 players" and turn USB on (page 3).
 
+## The screen in your terminal
+
+With USB on, every new screen also goes to the PC (`CHESS47 LCD 400 240`, 240 lines of hex, `END`; the moves still
+come as plain text lines between them). `tools/dm42view.py` (the same viewer as NAV47) shows it:
+
+```bash
+python3 tools/dm42view.py                 # Braille dots in the terminal
+python3 tools/dm42view.py --png shots/    # and a PNG of every screen
+```
+
+Chess 47 learns how the firmware stores the LCD lines when USB is turned on (it sets a pixel and looks which bit
+changes), so it relies only on `usb_acm_on`, `acm_puts` and `lcd_line_addr`.
+
 ## Build
 
 Requirements: `arm-none-eabi-gcc` (Debian/Ubuntu: `apt install gcc-arm-none-eabi libnewlib-arm-none-eabi`), `make`, `python3`.
@@ -125,7 +138,7 @@ then packs the `.pg5`: program size word plus SHA1 trailer.
 ```bash
 # simulator: real main.c + engine.c against a fake DMCP layer, renders the LCD
 gcc -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' \
-    -Itest/sim -Isrc -o build/sim test/sim/sim.c src/main.c src/engine.c
+    -Itest/sim -Isrc -o build/sim test/sim/sim.c src/main.c src/engine.c src/usbview.c
 cd build && ./sim 5 8 8 5 WAIT:2000 SNAP:shot && python3 ../test/sim/render.py shot shot.png
 
 # UCI engine (for cutechess, Arena, or the Elo test)

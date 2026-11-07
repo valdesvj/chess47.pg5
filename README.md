@@ -184,6 +184,26 @@ so Chess 47 drives the USB itself with **TinyUSB** (`src/usb/`, `third_party/tin
 not sleep (it would stop the USB). Chess 47 learns how the firmware stores the LCD lines (it sets a pixel and looks
 which bit changes).
 
+## In the browser (web/chess47.html)
+
+`web/chess47.html` is Chess 47 in one file for any browser, phone included, offline too: the same screen,
+soft keys and levels, and the engine of `src/engine.c` ported line for line to JavaScript (`web/engine.js`, in a
+Web Worker so the page stays responsive). Click or tap a piece, then its square; F1-F6 and the keypad keys work
+as on the calculator. With **DM42n speed** (on by default) the engine searches as many positions as the DM42n on
+USB power would in the same time, so the levels keep the calculator's strength; off, it uses the computer's
+full speed. The game is kept in the browser and resumed; PGN downloads the game, FEN copies the position.
+Chess960 and its number 1701 work too.
+
+![web](docs/web.png)
+
+The port is checked against the C: `test/test_web.js` compares perft counts, Zobrist keys, FEN, and fixed-depth
+searches (best move, score, node count, with the weak levels' root noise) with `test/jscheck.c`:
+
+```bash
+gcc -O2 -o build/jscheck test/jscheck.c src/engine.c && node test/test_web.js
+python3 tools/build_web.py      # web/app.html + engine.js + app.js + src/pieces.h -> web/chess47.html
+```
+
 ## Build
 
 Requirements: `arm-none-eabi-gcc` (Debian/Ubuntu: `apt install gcc-arm-none-eabi libnewlib-arm-none-eabi`), `make`, `python3`.

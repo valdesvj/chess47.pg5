@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chess 47 web</title>
+<meta name="description" content="Chess 47, the SwissMicros DM42n chess program, in the browser: the same engine, screen and keys.">
+<style>
+  :root { --bg: #e9ebe4; --fg: #22261e; --muted: #5d6356; --body: #3a3d36; --key: #2b2e29; --lcd: #c7cdba; --accent: #8a6d1f; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #16171a; --fg: #e4e6df; --muted: #9aa092; --body: #2a2c30; --key: #101113; --accent: #d1b05a; } }
+  :root[data-theme="dark"] { --bg: #16171a; --fg: #e4e6df; --muted: #9aa092; --body: #2a2c30; --key: #101113; --accent: #d1b05a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .02em; }
+  header span { color: var(--muted); font-size: 13px; }
+  .calc { background: var(--body); border-radius: 18px; padding: 18px 18px 22px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+  .brand { color: #f2f2ee; font: 600 15px system-ui, sans-serif; letter-spacing: .04em; margin: 0 0 8px 4px; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 4px; background: var(--lcd); touch-action: manipulation; cursor: pointer; }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+  .opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  details { margin-top: 18px; }
+  summary { cursor: pointer; font-weight: 600; }
+  table { border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+  td { padding: 3px 14px 3px 0; vertical-align: top; }
+  td:first-child { white-space: nowrap; font-family: ui-monospace, monospace; color: var(--accent); }
+  footer { margin-top: 22px; color: var(--muted); font-size: 12px; }
+  a { color: var(--accent); }
+  dialog { border: none; border-radius: 12px; padding: 18px 20px; background: var(--bg); color: var(--fg); box-shadow: 0 12px 40px rgba(0,0,0,.4); }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  dialog input { font: 20px ui-monospace, monospace; width: 7ch; padding: 4px 8px; margin: 8px 0 12px; }
+  dialog button { font: inherit; padding: 6px 12px; margin-right: 6px; border-radius: 6px; border: 1px solid var(--muted); background: transparent; color: var(--fg); cursor: pointer; }
+  dialog button[value="ok"] { background: var(--fg); color: var(--bg); }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Chess 47 web</h1><span>the DM42n program, its engine line for line in JavaScript</span></header>
+  <div class="calc">
+    <p class="brand">SwissMicros</p>
+    <canvas id="lcd" width="1200" height="720" aria-label="Chess 47 screen"></canvas>
+  </div>
+  <div class="opts">
+    <label><input type="checkbox" id="calc" checked> DM42n speed (the calculator's strength; off: this computer's full speed)</label>
+  </div>
+  <details>
+    <summary>Keys</summary>
+    <table>
+      <tr><td>click / tap</td><td>pick a piece, then its square (castling: the king, then its rook)</td></tr>
+      <tr><td>F1 … F6</td><td>the soft keys under the screen (or click them); &gt;&gt; the next page</td></tr>
+      <tr><td>8 2 4 6, arrows</td><td>the cursor; 7 9 1 3 diagonally</td></tr>
+      <tr><td>5, Enter</td><td>pick / play at the cursor</td></tr>
+      <tr><td>Esc</td><td>cancel; while the computer thinks: move now</td></tr>
+      <tr><td>Backspace</td><td>take back (two plies against the computer); Shift+Backspace resign</td></tr>
+    </table>
+    <p>Levels CRAZY, 1-9 as on the calculator. With <em>DM42n speed</em> the engine searches as many positions as the
+    DM42n on USB power would in the same time (about 19 000 a second), so the levels keep the calculator's strength
+    (level 9 about 2480 against Stockfish). The game is kept in this browser and resumed.</p>
+  </details>
+  <footer>Chess 47 © 2026 Victor Valdes, MIT License · <a href="https://github.com/valdesvj/chess47.pg5">github.com/valdesvj/chess47.pg5</a></footer>
+</main>
+<dialog id="n960">
+  <form method="dialog">
+    <div><strong>Chess960</strong>: the position's number, 0-959</div>
+    <input type="number" min="0" max="9999" inputmode="numeric" placeholder="518">
+    <div><button value="ok">Start</button><button value="random">Random</button><button value="cancel">Cancel</button></div>
+  </form>
+</dialog>
+<script id="engine-src">/*ENGINE*/</script>
+<script>/*PIECES*/</script>
+<script>/*APP*/</script>
+</body>
+</html>

@@ -938,43 +938,62 @@ static void show_qr(void) {
     return;
   }
 
-  /* Encode only the current position. A FEN fits in QR version 10. */
+  /* QR payload is the current position only, not the game history. */
   char fen[100];
   pos_to_fen(CUR, fen);
-  int len = (int)strlen(fen);
 
   QRCode qr;
   uint8_t *buf = NULL;
   int ok = -1;
 
-  /* Allocate once at the largest version we'll try; avoid heap churn. */
-  uint16_t buf_size = qrcode_getBufferSize(10);
-  if (buf_size > 0)
-    buf = malloc(buf_size);
+  /* Try versions with an exact-sized buffer for each attempt. */
+  for (int version = 1; version <= 10; version++) {
+    uint16_t size = qrcode_getBufferSize((uint8_t)version);
+    if (size == 0)
+      break;
 
-  if (buf) {
-    for (int version = 1; version <= 10; version++) {
-      ok = qrcode_initText(&qr, buf, (uint8_t)version, ECC_LOW, fen);
-      if (ok == 0)
-        break;
-    }
+    buf = malloc(size);
+    if (!buf)
+      break;
+
+    ok = qrcode_initText(&qr, buf, (uint8_t)version, ECC_LOW, fen);
+    if (ok == 0)
+      break;
+
+    free(buf);
+    buf = NULL;
   }
 
   int qr_ok = buf && ok == 0 && qr.size > 0 && qr.size <= 177;
   lcd_clear_buf();
 
   if (qr_ok) {
-    int z = (LCD_Y - 16) / qr.size;
+    const int quiet = 4;  /* standard QR quiet zone, measured in modules */
+    int modules = qr.size + 2 * quiet;
+    int z = (LCD_Y - 16) / modules;
     if (z < 1)
       z = 1;
 
-    int px = qr.size * z;
-    qrcode_disp(&qr, 8, (LCD_Y - px) / 2, z);
+    int px = modules * z;
+    int x0 = 8;
+    int y0 = (LCD_Y - px) / 2;
+
+    /* Draw dark modules directly; the cleared buffer provides the light
+       background and quiet zone. */
+    for (int y = 0; y < qr.size; y++) {
+      for (int x = 0; x < qr.size; x++) {
+        if (qrcode_getModule(&qr, (uint8_t)x, (uint8_t)y)) {
+          lcd_fill_rect(x0 + (x + quiet) * z,
+                        y0 + (y + quiet) * z,
+                        z, z, 1);
+        }
+      }
+    }
 
     char s[40];
-    int tx = px + 24;
+    int tx = x0 + px + 12;
     text_at(t24, tx, 20, "Position QR", 1);
-    sprintf(s, "%d FEN chars  v%d", len, qr.version);
+    sprintf(s, "%d FEN chars", (int)strlen(fen));
     text_at(t20, tx, 60, s, 0);
     text_at(t20, tx, 100, "Scan for this", 0);
     text_at(t20, tx, 122, "board position", 0);
@@ -986,13 +1005,12 @@ static void show_qr(void) {
 
   lcd_show();
 
-  /* Keep the QR workspace alive through the LCD refresh. */
+  /* Keep the QR module buffer alive until drawing and refresh are complete. */
   if (buf)
     free(buf);
 
   wait_exit();
 }
-
 static void show_info(void) {
   char s[64];
   lcd_clear_buf();

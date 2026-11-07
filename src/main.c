@@ -938,26 +938,24 @@ static void show_qr(void) {
     return;
   }
 
-  /* QR payload is the current position only, not the full game. */
+  /* Encode the current position only, not the game history. */
   char fen[100];
   pos_to_fen(CUR, fen);
-  int len = (int)strlen(fen);
+  const char *txt = fen;
+  int len = (int)strlen(txt);
 
   QRCode qr;
   uint8_t *buf = NULL;
   int ok = -1;
 
-  /* Try small QR versions; FEN is short even after a long game. */
-  for (int version = 1; version <= 10; version++) {
-    uint16_t size = qrcode_getBufferSize((uint8_t)version);
-    if (size == 0)
-      break;
-
-    buf = malloc(size);
+  /* Keep the existing version search: versions 1 through 40. */
+  for (int v = 1; v <= 40; v++) {
+    uint16_t bs = qrcode_getBufferSize((uint8_t)v);
+    buf = malloc(bs);
     if (!buf)
       break;
 
-    ok = qrcode_initText(&qr, buf, (uint8_t)version, ECC_LOW, fen);
+    ok = qrcode_initText(&qr, buf, (uint8_t)v, ECC_LOW, txt);
     if (ok == 0)
       break;
 
@@ -967,7 +965,7 @@ static void show_qr(void) {
 
   lcd_clear_buf();
 
-  if (ok == 0 && buf && qr.size > 0) {
+  if (ok == 0 && buf) {
     int z = (LCD_Y - 16) / qr.size;
     if (z < 1)
       z = 1;
@@ -985,15 +983,13 @@ static void show_qr(void) {
     text_at(t20, tx, 164, "analysis board.", 0);
     text_at(t20, tx, 210, "EXIT to return", 0);
   } else {
-    text_at(t24, 20, 100,
-            buf ? "QR generation failed" : "Not enough QR memory", 0);
+    text_at(t24, 20, 100, "QR generation failed", 0);
   }
 
-  /* Keep the QR buffer alive until the LCD has finished refreshing. */
-  lcd_show();
   if (buf)
     free(buf);
 
+  lcd_show();
   wait_exit();
 }
           

@@ -918,10 +918,7 @@ static void export_pgn(void) {
   strcpy(status, write_file(DIR "/GAME.PGN", G->fbuf) ? "PGN saved" : "PGN failed");
 }
 
-static void export_pgn(void) {
-  build_pgn(G->fbuf, 1);
-  strcpy(status, write_file(DIR "/GAME.PGN", G->fbuf) ? "PGN saved" : "PGN failed");
-}
+
 
 /* ------------------------------------------------------------------ */
 /*  Extra screens                                                     */

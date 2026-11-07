@@ -1,4 +1,4 @@
-can incrreas/*
+/*
  * CHESS 47 for SwissMicros DM42n (DMCP5 native program, .pg5)
  * (C) 2026 Victor Valdes (valdes.vj@gmail.com) - MIT License
  *
@@ -933,40 +933,33 @@ static void wait_exit(void) {
 }
 
 static void show_qr(void) {
-/* QR unavailable in demo */
   if (cfg.mode == MODE_CC) {
     strcpy(status, "QR unavailable in demo");
     return;
   }
 
-  /* Moves only (plus FEN for 960) keeps the code small and scannable. */
-  char *txt = G->fbuf;
-  char *o = txt;
-  size_t remaining = sizeof G->fbuf;
-  int text_ok = 1;
-
-  if (chess960 || G->hist[0].fullmove != 1) {
-    char fen[100];
-    pos_to_fen(&G->hist[0], fen);
-    text_ok = appendf(&o, &remaining, "[FEN \"%s\"]\n", fen);
-  }
-  if (text_ok) text_ok = build_pgn(o, remaining, 0);
+  /* Encode only the current position, not the move history. */
+  char fen[100];
+  pos_to_fen(CUR, fen);
+  int len = (int)strlen(fen);
 
   QRCode qr;
   uint8_t *buf = NULL;
   int ok = -1;
 
-  /* One max-sized allocation avoids repeated heap allocation while trying
-     progressively larger QR versions. */
-  uint16_t bs = qrcode_getBufferSize(40);
-  if (text_ok && bs > 0)
-    buf = malloc(bs);
+  /* Try successively larger QR versions, freeing each failed attempt. */
+  for (int v = 1; v <= 40; v++) {
+    uint16_t bs = qrcode_getBufferSize((uint8_t)v);
+    if (bs == 0) break;
 
-  if (buf) {
-    for (int v = 1; v <= 40; v++) {
-      ok = qrcode_initText(&qr, buf, (uint8_t)v, ECC_LOW, txt);
-      if (ok == 0) break;
-    }
+    buf = malloc(bs);
+    if (!buf) break;
+
+    ok = qrcode_initText(&qr, buf, (uint8_t)v, ECC_LOW, fen);
+    if (ok == 0) break;
+
+    free(buf);
+    buf = NULL;
   }
 
   int qr_ok = buf && ok == 0 && qr.size > 0 && qr.size <= 177;
@@ -981,22 +974,20 @@ static void show_qr(void) {
 
     char s[40];
     int tx = px + 24;
-    text_at(t24, tx, 20, "Game QR", 1);
-    sprintf(s, "%d moves", (G->n + 1) / 2);
+    text_at(t24, tx, 20, "Position QR", 1);
+    sprintf(s, "%d FEN chars  v%d", len, qr.version);
     text_at(t20, tx, 60, s, 0);
-    sprintf(s, "%d chars  v%d", (int)strlen(txt), qr.version);
-    text_at(t20, tx, 84, s, 0);
-    text_at(t20, tx, 120, "Scan with phone,", 0);
-    text_at(t20, tx, 142, "paste in lichess", 0);
-    text_at(t20, tx, 164, "analysis board.", 0);
+    text_at(t20, tx, 100, "Scan to copy", 0);
+    text_at(t20, tx, 122, "this position", 0);
     text_at(t20, tx, 210, "EXIT to return", 0);
   } else {
-    text_at(t24, 20, 100,
-            !text_ok ? "Game text too long" :
-            !buf ? "Not enough QR memory" : "Cannot make QR code", 0);
+    const char *msg = !buf ? "QR memory unavailable" : "Cannot make QR code";
+    text_at(t24, 20, 100, msg, 0);
   }
 
   lcd_show();
+
+  /* Keep the QR workspace alive until the screen has been drawn. */
   if (buf) free(buf);
   wait_exit();
 }

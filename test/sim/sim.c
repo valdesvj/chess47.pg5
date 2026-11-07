@@ -88,6 +88,7 @@ void lcd_draw_menu_keys(const char *keys[]) {
 void qrcode_disp(QRCode *qr, int xo, int yo, int z) { (void)qr; (void)xo; (void)yo; (void)z; }
 uint16_t qrcode_getBufferSize(uint8_t v) { (void)v; return 64; }
 int8_t qrcode_initText(QRCode *q, uint8_t *m, uint8_t v, uint8_t e, const char *d) { (void)q; (void)m; (void)v; (void)e; (void)d; return -1; }
+bool qrcode_getModule(QRCode *q, uint8_t x, uint8_t y) { (void)q; (void)x; (void)y; return 0; }
 
 /* ---------------- time / power ---------------- */
 uint32_t sys_current_ms(void) {

@@ -428,6 +428,7 @@ static void draw_banner(void) {
 }
 
 static void draw_menu(void) {
+  if (promo_mode) { lcd_draw_menu_keys(PROMO_MENU); return; }   /* Queen Rook Bishop Knight ... Cancel */
   const char *keys[6];
   for (int i = 0; i < 6; i++) keys[i] = MENU[cfg.page][i];
 
@@ -1248,7 +1249,7 @@ static void program_init(void) {
 
 /* lines from the PC over USB: in "vs USB" mode the opponent's move in UCI (e7e5, e7e8q; castling king to rook
    square or to its own square, as str_to_move), or "msg <text>" for the status line. 1 if the screen changed. */
-static char rxl[48];
+static char rxl[128];                     /* "newgame white <FEN>": a FEN is up to ~90 characters */
 static int rxn;
 static int usb_line(const char *l) {
   if (!strncmp(l, "msg ", 4)) { snprintf(status, sizeof status, "%.36s", l + 4); return 1; }

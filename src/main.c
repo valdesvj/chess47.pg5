@@ -938,7 +938,7 @@ static void show_qr(void) {
     return;
   }
 
-  /* Encode current board position, not all game history. */
+  /* Encode only the current position. A FEN fits in QR version 10. */
   char fen[100];
   pos_to_fen(CUR, fen);
   int len = (int)strlen(fen);
@@ -947,44 +947,49 @@ static void show_qr(void) {
   uint8_t *buf = NULL;
   int ok = -1;
 
-  for (int v = 1; v <= 40; v++) {
-    uint16_t bs = qrcode_getBufferSize((uint8_t)v);
-    if (bs == 0) break;
+  /* Allocate once at the largest version we'll try; avoid heap churn. */
+  uint16_t buf_size = qrcode_getBufferSize(10);
+  if (buf_size > 0)
+    buf = malloc(buf_size);
 
-    buf = malloc(bs);
-    if (!buf) break;
-
-    ok = qrcode_initText(&qr, buf, (uint8_t)v, ECC_LOW, fen);
-    if (ok == 0) break;
-
-    free(buf);
-    buf = NULL;
+  if (buf) {
+    for (int version = 1; version <= 10; version++) {
+      ok = qrcode_initText(&qr, buf, (uint8_t)version, ECC_LOW, fen);
+      if (ok == 0)
+        break;
+    }
   }
 
+  int qr_ok = buf && ok == 0 && qr.size > 0 && qr.size <= 177;
   lcd_clear_buf();
 
-  if (ok == 0 && buf) {
+  if (qr_ok) {
     int z = (LCD_Y - 16) / qr.size;
-    if (z < 1) z = 1;
-    int px = qr.size * z;
+    if (z < 1)
+      z = 1;
 
+    int px = qr.size * z;
     qrcode_disp(&qr, 8, (LCD_Y - px) / 2, z);
 
     char s[40];
     int tx = px + 24;
     text_at(t24, tx, 20, "Position QR", 1);
-    sprintf(s, "%d chars  v%d", len, qr.version);
+    sprintf(s, "%d FEN chars  v%d", len, qr.version);
     text_at(t20, tx, 60, s, 0);
-    text_at(t20, tx, 120, "Scan with phone,", 0);
-    text_at(t20, tx, 142, "paste in lichess", 0);
-    text_at(t20, tx, 164, "analysis board.", 0);
+    text_at(t20, tx, 100, "Scan for this", 0);
+    text_at(t20, tx, 122, "board position", 0);
     text_at(t20, tx, 210, "EXIT to return", 0);
   } else {
-    text_at(t24, 20, 100, "QR unavailable", 0);
+    text_at(t24, 20, 100,
+            buf ? "QR generation failed" : "Not enough QR memory", 0);
   }
 
-  if (buf) free(buf);
   lcd_show();
+
+  /* Keep the QR workspace alive through the LCD refresh. */
+  if (buf)
+    free(buf);
+
   wait_exit();
 }
 

@@ -971,7 +971,7 @@ static void show_qr(void) {
       z = 1;
 
     int px = qr.size * z;
-    qrcode_disp(&qr, 8, (LCD_Y - px) / 2, z);
+    //qrcode_disp(&qr, 8, (LCD_Y - px) / 2, z);
 
     char s[40];
     int tx = px + 24;

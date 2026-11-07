@@ -397,7 +397,7 @@ static void lcd_show(void) {
 
 /* the end of the game, in a box on the board: what happened, why, the result */
 static void draw_banner(void) {
-  if (!G->over) return;
+  /*if (!G->over) return;
   const char *L[3] = { "", "", "" };
   int loser = CUR->side;
   const char *win = loser == WHITE ? "Black wins  0-1" : "White wins  1-0";
@@ -415,8 +415,8 @@ static void draw_banner(void) {
   int h24 = lh(t24), h20 = lh(t20), n = L[1][0] ? 3 : 2;
   int bh = h24 + (n - 1) * h20 + 12, bw = BOARD_PX - 8;
   int x0 = BX + 4, y0 = BY + (BOARD_PX - bh) / 2;
-  lcd_fill_rect((uint32_t)x0 - 2, (uint32_t)y0 - 2, (uint32_t)bw + 4, (uint32_t)bh + 4, 0);   /* a white rim */
-  lcd_fill_rect((uint32_t)x0, (uint32_t)y0, (uint32_t)bw, (uint32_t)bh, 1);
+  lcd_fill_rect((uint32_t)x0 - 2, (uint32_t)y0 - 2, (uint32_t)bw + 4, (uint32_t)bh + 4, 0); */  /* a white rim */
+  /*lcd_fill_rect((uint32_t)x0, (uint32_t)y0, (uint32_t)bw, (uint32_t)bh, 1);
   int y = y0 + 5;
   text_at(t24, x0 + (bw - lcd_textWidth(t24, L[0])) / 2, y, L[0], 1);
   y += h24;
@@ -424,7 +424,7 @@ static void draw_banner(void) {
     if (!L[i][0]) continue;
     text_at(t20, x0 + (bw - lcd_textWidth(t20, L[i])) / 2, y, L[i], 1);
     y += h20;
-  }
+  } */
 }
 
 static void draw_menu(void) {
@@ -933,21 +933,33 @@ static void wait_exit(void) {
 }
 
 static void show_qr(void) {
+  /* QR unavailable in demo. */
   if (cfg.mode == MODE_CC) {
     strcpy(status, "QR unavailable in demo");
     return;
   }
 
-  /* QR payload is the current position only, not the game history. */
-  char fen[100];
-  pos_to_fen(CUR, fen);
+  /* Include the starting FEN when the game didn't start from the normal
+     initial position, then append the moves. */
+  char *txt = G->fbuf;
+  char *o = txt;
+  size_t remaining = sizeof G->fbuf;
+  int text_ok = 1;
 
+  if (chess960 || G->hist[0].fullmove != 1) {
+    char fen[100];
+    pos_to_fen(&G->hist[0], fen);
+    text_ok = appendf(&o, &remaining, "[FEN \"%s\"]\n", fen);
+  }
+  if (text_ok)
+    text_ok = build_pgn(o, remaining, 0);
+
+  int len = text_ok ? (int)strlen(txt) : 0;
   QRCode qr;
   uint8_t *buf = NULL;
   int ok = -1;
 
-  /* Try versions with an exact-sized buffer for each attempt. */
-  for (int version = 1; version <= 10; version++) {
+  for (int version = 1; text_ok && version <= 40; version++) {
     uint16_t size = qrcode_getBufferSize((uint8_t)version);
     if (size == 0)
       break;
@@ -956,7 +968,7 @@ static void show_qr(void) {
     if (!buf)
       break;
 
-    ok = qrcode_initText(&qr, buf, (uint8_t)version, ECC_LOW, fen);
+    ok = qrcode_initText(&qr, buf, (uint8_t)version, ECC_LOW, txt);
     if (ok == 0)
       break;
 
@@ -964,53 +976,39 @@ static void show_qr(void) {
     buf = NULL;
   }
 
-  int qr_ok = buf && ok == 0 && qr.size > 0 && qr.size <= 177;
   lcd_clear_buf();
 
-  if (qr_ok) {
-    const int quiet = 4;  /* standard QR quiet zone, measured in modules */
-    int modules = qr.size + 2 * quiet;
-    int z = (LCD_Y - 16) / modules;
+  if (ok == 0 && buf && qr.size > 0) {
+    int z = (LCD_Y - 16) / qr.size;
     if (z < 1)
       z = 1;
 
-    int px = modules * z;
-    int x0 = 8;
-    int y0 = (LCD_Y - px) / 2;
-
-    /* Draw dark modules directly; the cleared buffer provides the light
-       background and quiet zone. */
-    for (int y = 0; y < qr.size; y++) {
-      for (int x = 0; x < qr.size; x++) {
-        if (qrcode_getModule(&qr, (uint8_t)x, (uint8_t)y)) {
-          lcd_fill_rect(x0 + (x + quiet) * z,
-                        y0 + (y + quiet) * z,
-                        z, z, 1);
-        }
-      }
-    }
+    int px = qr.size * z;
+    qrcode_disp(&qr, 8, (LCD_Y - px) / 2, z);
 
     char s[40];
-    int tx = x0 + px + 12;
-    text_at(t24, tx, 20, "Position QR", 1);
-    sprintf(s, "%d FEN chars", (int)strlen(fen));
+    int tx = px + 24;
+    text_at(t24, tx, 20, "Game QR", 1);
+    sprintf(s, "%d moves", (G->n + 1) / 2);
     text_at(t20, tx, 60, s, 0);
-    text_at(t20, tx, 100, "Scan for this", 0);
-    text_at(t20, tx, 122, "board position", 0);
+    sprintf(s, "%d chars  v%d", len, qr.version);
+    text_at(t20, tx, 84, s, 0);
+    text_at(t20, tx, 120, "Scan with phone,", 0);
+    text_at(t20, tx, 142, "paste in lichess", 0);
+    text_at(t20, tx, 164, "analysis board.", 0);
     text_at(t20, tx, 210, "EXIT to return", 0);
   } else {
     text_at(t24, 20, 100,
-            buf ? "QR generation failed" : "Not enough QR memory", 0);
+            text_ok ? "Game too long for QR" : "Game text too long", 0);
   }
 
-  lcd_show();
-
-  /* Keep the QR module buffer alive until drawing and refresh are complete. */
   if (buf)
     free(buf);
 
+  lcd_show();
   wait_exit();
 }
+          
 static void show_info(void) {
   char s[64];
   lcd_clear_buf();

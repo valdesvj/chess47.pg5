@@ -441,6 +441,8 @@ static void redraw(void) {
   draw_board();
   //draw_banner();
   draw_panel();
+  if (G->over)
+  text_at(t20, 2, lh(t20) + 4 + lh(t20), result_text(G->over, CUR->side), 1);
   draw_menu();
   lcd_show();
   if (cfg.usb) usbview_send();                 /* the screen to the PC (tools/dm42view.py) */

@@ -97,7 +97,8 @@ static int  shift;
 static int  promo_mode;            /* waiting for promotion choice */
 static Move promo_opts[4];
 static int  num_mode, num_len;     /* 960 number entry */
-static char num_buf[4];
+static char num_buf[5];
+static int  kirk;                  /* 960 # 1701: the Kobayashi Maru, Kirk rules (the C47 forum joke) */
 static char status[40];
 static int  thinking;
 static uint32_t last_nps, last_think_ms;
@@ -308,6 +309,7 @@ static void draw_clock(void) {
 }
 
 static const char *result_text(int code, int loser) {
+  if (kirk && code == 1) return loser == WHITE ? "Kirk wins  0-1" : "Kirk wins  1-0";
   switch (code) {
   case 1: return loser == WHITE ? "Checkmate  0-1" : "Checkmate  1-0";
   case 2: return "Stalemate  1/2";
@@ -472,6 +474,7 @@ static void new_game_from(const Pos *start, int pos960) {
   G->n = 0;
   G->over = 0;
   G->pos960 = pos960;
+  kirk = 0;
   sel = hint_from = hint_to = last_from = last_to = NOSQ;
   cur = cfg.flip ? 0x64 : 0x14;
   status[0] = 0;
@@ -1089,9 +1092,24 @@ static void select_square(void) {
 
 static void start_960_entry(void) { num_mode = 1; num_len = 0; num_buf[0] = 0; }
 
+/* Easter egg, 960 # 1701 (NCC-1701): the no-win scenario reprogrammed, as Kirk did at the Academy. The engine
+   keeps its king and pawns only. For the C47 forum, who beat CHESS47 "under the James T Kirk rules". */
+static void kobayashi_maru(void) {
+  Pos p;
+  pos_from_fen(&p, cfg.human == BLACK && cfg.mode != MODE_HH && cfg.mode != MODE_CC
+                   ? "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/4K3 w kq - 0 1"
+                   : "4k3/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQ - 0 1");
+  chess960 = 0;
+  new_game_from(&p, -1);
+  kirk = 1;
+  strcpy(status, "KIRK RULES!");
+  beep(1047, 120); beep(1319, 120); beep(1568, 240);
+}
+
 static void finish_960_entry(void) {
   num_mode = 0;
   int n = num_len ? atoi(num_buf) : (int)(rnd() % 960);
+  if (n == 1701) { kobayashi_maru(); return; }
   if (n > 959) { strcpy(status, "960 # must be 0-959"); return; }
   new_game(n);
   sprintf(status, "Chess960 #%d", n);
@@ -1156,7 +1174,7 @@ static void handle_key(int key) {
       int d = -1;
       static const int dk[10] = { KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9 };
       for (int i = 0; i < 10; i++) if (key == dk[i]) d = i;
-      if (d >= 0 && num_len < 3) { num_buf[num_len++] = (char)('0' + d); num_buf[num_len] = 0; }
+      if (d >= 0 && num_len < 4) { num_buf[num_len++] = (char)('0' + d); num_buf[num_len] = 0; }
     }
     shift = 0;
     return;

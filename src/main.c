@@ -335,9 +335,9 @@ static void draw_panel(void) {
   /* status line */
   /* the game's state first (the result, check), then the engine's line: the search used to hide "check" */
   int inv = 0;
-  if (num_mode) sprintf(s, "960 #: %s_", num_buf);
+  if (G->over) { strcpy(s, result_text(G->over, CUR->side)); inv = 1; }
+  else if (num_mode) sprintf(s, "960 #: %s_", num_buf);
   else if (promo_mode) sprintf(s, "Promote to?");
-  else if (G->over) { strcpy(s, result_text(G->over, CUR->side)); inv = 1; }
   else if (in_check(CUR)) { sprintf(s, "CHECK! %s to move", CUR->side ? "Black" : "White"); inv = 1; }
   else if (status[0]) strcpy(s, status);
   else sprintf(s, "%s to move", CUR->side ? "Black" : "White");
@@ -439,10 +439,8 @@ static void draw_menu(void) {
 static void redraw(void) {
   lcd_clear_buf();
   draw_board();
-  //draw_banner();
+  draw_banner();
   draw_panel();
-  if (G->over)
-  text_at(t20, 2, lh(t20) + 4 + lh(t20), result_text(G->over, CUR->side), 1);
   draw_menu();
   lcd_show();
   if (cfg.usb) usbview_send();                 /* the screen to the PC (tools/dm42view.py) */

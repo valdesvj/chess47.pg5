@@ -1,4 +1,4 @@
-/*
+can incrreas/*
  * CHESS 47 for SwissMicros DM42n (DMCP5 native program, .pg5)
  * (C) 2026 Victor Valdes (valdes.vj@gmail.com) - MIT License
  *
@@ -939,11 +939,12 @@ static void show_qr(void) {
     return;
   }
 
-  /* moves only (plus FEN for 960) keeps the code small and scannable */
+  /* Moves only (plus FEN for 960) keeps the code small and scannable. */
   char *txt = G->fbuf;
   char *o = txt;
   size_t remaining = sizeof G->fbuf;
   int text_ok = 1;
+
   if (chess960 || G->hist[0].fullmove != 1) {
     char fen[100];
     pos_to_fen(&G->hist[0], fen);
@@ -951,40 +952,52 @@ static void show_qr(void) {
   }
   if (text_ok) text_ok = build_pgn(o, remaining, 0);
 
-  int len = text_ok ? (int)strlen(txt) : 0;
   QRCode qr;
   uint8_t *buf = NULL;
   int ok = -1;
-  for (int v = 1; text_ok && v <= 40; v++) {
-    uint16_t bs = qrcode_getBufferSize((uint8_t)v);
+
+  /* One max-sized allocation avoids repeated heap allocation while trying
+     progressively larger QR versions. */
+  uint16_t bs = qrcode_getBufferSize(40);
+  if (text_ok && bs > 0)
     buf = malloc(bs);
-    if (!buf) break;
-    ok = qrcode_initText(&qr, buf, (uint8_t)v, ECC_LOW, txt);
-    if (ok == 0) break;
-    free(buf); buf = NULL;
+
+  if (buf) {
+    for (int v = 1; v <= 40; v++) {
+      ok = qrcode_initText(&qr, buf, (uint8_t)v, ECC_LOW, txt);
+      if (ok == 0) break;
+    }
   }
+
+  int qr_ok = buf && ok == 0 && qr.size > 0 && qr.size <= 177;
   lcd_clear_buf();
-  if (ok == 0 && buf) {
+
+  if (qr_ok) {
     int z = (LCD_Y - 16) / qr.size;
     if (z < 1) z = 1;
+
     int px = qr.size * z;
     qrcode_disp(&qr, 8, (LCD_Y - px) / 2, z);
+
     char s[40];
     int tx = px + 24;
     text_at(t24, tx, 20, "Game QR", 1);
     sprintf(s, "%d moves", (G->n + 1) / 2);
     text_at(t20, tx, 60, s, 0);
-    sprintf(s, "%d chars  v%d", len, qr.version);
+    sprintf(s, "%d chars  v%d", (int)strlen(txt), qr.version);
     text_at(t20, tx, 84, s, 0);
     text_at(t20, tx, 120, "Scan with phone,", 0);
     text_at(t20, tx, 142, "paste in lichess", 0);
     text_at(t20, tx, 164, "analysis board.", 0);
     text_at(t20, tx, 210, "EXIT to return", 0);
   } else {
-    text_at(t24, 20, 100, "Game too long for QR", 0);
+    text_at(t24, 20, 100,
+            !text_ok ? "Game text too long" :
+            !buf ? "Not enough QR memory" : "Cannot make QR code", 0);
   }
-  if (buf) free(buf);
+
   lcd_show();
+  if (buf) free(buf);
   wait_exit();
 }
 

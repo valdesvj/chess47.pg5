@@ -11,6 +11,7 @@
 #include <main.h>
 #include <dmcp.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -834,8 +835,33 @@ static int load_game(const char *path) {
   return deserialize(G->fbuf);
 }
 
-static void build_pgn(char *o, int with_tags) {
-  char *start = o;
+/* Append formatted text without writing past the destination buffer.
+   On failure, leave a terminated, partial string and return 0. */
+static int appendf(char **out, size_t *remaining, const char *fmt, ...) {
+  if (*remaining == 0) return 0;
+
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(*out, *remaining, fmt, ap);
+  va_end(ap);
+
+  if (n < 0 || (size_t)n >= *remaining) {
+    (*out)[*remaining - 1] = '\0';
+    *remaining = 0;
+    return 0;
+  }
+
+  *out += n;
+  *remaining -= (size_t)n;
+  return 1;
+}
+
+/* Returns 0 if the complete PGN does not fit in cap bytes, including '\0'. */
+static int build_pgn(char *o, size_t cap, int with_tags) {
+  if (cap == 0) return 0;
+  *o = '\0';
+  size_t remaining = cap;
+
   if (with_tags) {
     tm_t tm; dt_t dt;
     rtc_read(&tm, &dt);
@@ -845,28 +871,51 @@ static void build_pgn(char *o, int with_tags) {
     sprintf(lvl, "Chess 47 L%s", LEVELS[cfg.level].name);
     const char *w = cfg.mode == MODE_HH || (cfg.mode == MODE_HC && cfg.human == WHITE) ? "Human" : lvl;
     const char *b = cfg.mode == MODE_HH || (cfg.mode == MODE_HC && cfg.human == BLACK) ? "Human" : lvl;
-    o += sprintf(o, "[Event \"Chess 47 on DM42n\"]\n[Site \"SwissMicros DM42n\"]\n"
-                    "[Date \"%04d.%02d.%02d\"]\n[White \"%s\"]\n[Black \"%s\"]\n[Result \"%s\"]\n",
-                 dt.year, dt.month, dt.day, w, b, result_tag());
+    if (!appendf(&o, &remaining,
+                 "[Event \"Chess 47 on DM42n\"]\n[Site \"SwissMicros DM42n\"]\n"
+                 "[Date \"%04d.%02d.%02d\"]\n[White \"%s\"]\n[Black \"%s\"]\n[Result \"%s\"]\n",
+                 dt.year, dt.month, dt.day, w, b, result_tag())) return 0;
     if (chess960 || G->hist[0].fullmove != 1 || G->hist[0].side != WHITE)
-      o += sprintf(o, "%s[SetUp \"1\"]\n[FEN \"%s\"]\n", chess960 ? "[Variant \"Chess960\"]\n" : "", fen);
-    if (cfg.tc) o += sprintf(o, "[TimeControl \"%lu+%lu\"]\n", (unsigned long)TCS[cfg.tc].base_s, (unsigned long)TCS[cfg.tc].inc_s);
-    *o++ = '\n';
+      if (!appendf(&o, &remaining, "%s[SetUp \"1\"]\n[FEN \"%s\"]\n",
+                   chess960 ? "[Variant \"Chess960\"]\n" : "", fen)) return 0;
+    if (cfg.tc)
+      if (!appendf(&o, &remaining, "[TimeControl \"%lu+%lu\"]\n",
+                   (unsigned long)TCS[cfg.tc].base_s,
+                   (unsigned long)TCS[cfg.tc].inc_s)) return 0;
+    if (!appendf(&o, &remaining, "\n")) return 0;
   }
+
   int col = 0;
   for (int i = 0; i < G->n; i++) {
     const Pos *p = &G->hist[i];
     char tok[20];
-    if (p->side == WHITE) sprintf(tok, "%d. %s", p->fullmove, G->san[i]);
-    else if (i == 0) sprintf(tok, "%d... %s", p->fullmove, G->san[i]);
-    else strcpy(tok, G->san[i]);
-    int len = (int)strlen(tok);
-    if (with_tags && col + len > 78) { *o++ = '\n'; col = 0; }
-    else if (col) { *o++ = ' '; col++; }
-    strcpy(o, tok); o += len; col += len;
-    if ((size_t)(o - start) > sizeof G->fbuf - 64) break;
+    int n;
+    if (p->side == WHITE) n = snprintf(tok, sizeof tok, "%d. %s", p->fullmove, G->san[i]);
+    else if (i == 0) n = snprintf(tok, sizeof tok, "%d... %s", p->fullmove, G->san[i]);
+    else n = snprintf(tok, sizeof tok, "%s", G->san[i]);
+    if (n < 0 || (size_t)n >= sizeof tok) return 0;
+
+    int len = n;
+    if (with_tags && col + len > 78) {
+      if (!appendf(&o, &remaining, "\n")) return 0;
+      col = 0;
+    } else if (col) {
+      if (!appendf(&o, &remaining, " ")) return 0;
+      col++;
+    }
+    if (!appendf(&o, &remaining, "%s", tok)) return 0;
+    col += len;
   }
-  o += sprintf(o, "%s%s\n", col ? " " : "", result_tag());
+
+  return appendf(&o, &remaining, "%s%s\n", col ? " " : "", result_tag());
+}
+
+static void export_pgn(void) {
+  if (!build_pgn(G->fbuf, sizeof G->fbuf, 1)) {
+    strcpy(status, "PGN too long");
+    return;
+  }
+  strcpy(status, write_file(DIR "/GAME.PGN", G->fbuf) ? "PGN saved" : "PGN failed");
 }
 
 static void export_pgn(void) {
@@ -887,8 +936,7 @@ static void wait_exit(void) {
 }
 
 static void show_qr(void) {
-          
-  /* QR unavaiable in demo - cheap code to avoid the crash */
+/* QR unavailable in demo */
   if (cfg.mode == MODE_CC) {
     strcpy(status, "QR unavailable in demo");
     return;
@@ -897,17 +945,20 @@ static void show_qr(void) {
   /* moves only (plus FEN for 960) keeps the code small and scannable */
   char *txt = G->fbuf;
   char *o = txt;
+  size_t remaining = sizeof G->fbuf;
+  int text_ok = 1;
   if (chess960 || G->hist[0].fullmove != 1) {
     char fen[100];
     pos_to_fen(&G->hist[0], fen);
-    o += sprintf(o, "[FEN \"%s\"]\n", fen);
+    text_ok = appendf(&o, &remaining, "[FEN \"%s\"]\n", fen);
   }
-  build_pgn(o, 0);
-  int len = (int)strlen(txt);
+  if (text_ok) text_ok = build_pgn(o, remaining, 0);
+
+  int len = text_ok ? (int)strlen(txt) : 0;
   QRCode qr;
   uint8_t *buf = NULL;
   int ok = -1;
-  for (int v = 1; v <= 40; v++) {
+  for (int v = 1; text_ok && v <= 40; v++) {
     uint16_t bs = qrcode_getBufferSize((uint8_t)v);
     buf = malloc(bs);
     if (!buf) break;

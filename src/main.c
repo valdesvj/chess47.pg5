@@ -397,7 +397,7 @@ static void lcd_show(void) {
 
 /* the end of the game, in a box on the board: what happened, why, the result */
 static void draw_banner(void) {
-  /*if (!G->over) return;
+  if (!G->over) return;
   const char *L[3] = { "", "", "" };
   int loser = CUR->side;
   const char *win = loser == WHITE ? "Black wins  0-1" : "White wins  1-0";
@@ -415,8 +415,8 @@ static void draw_banner(void) {
   int h24 = lh(t24), h20 = lh(t20), n = L[1][0] ? 3 : 2;
   int bh = h24 + (n - 1) * h20 + 12, bw = BOARD_PX - 8;
   int x0 = BX + 4, y0 = BY + (BOARD_PX - bh) / 2;
-  lcd_fill_rect((uint32_t)x0 - 2, (uint32_t)y0 - 2, (uint32_t)bw + 4, (uint32_t)bh + 4, 0); */  /* a white rim */
-  /*lcd_fill_rect((uint32_t)x0, (uint32_t)y0, (uint32_t)bw, (uint32_t)bh, 1);
+  lcd_fill_rect((uint32_t)x0 - 2, (uint32_t)y0 - 2, (uint32_t)bw + 4, (uint32_t)bh + 4, 0);   /* a white rim */
+  lcd_fill_rect((uint32_t)x0, (uint32_t)y0, (uint32_t)bw, (uint32_t)bh, 1);
   int y = y0 + 5;
   text_at(t24, x0 + (bw - lcd_textWidth(t24, L[0])) / 2, y, L[0], 1);
   y += h24;
@@ -424,7 +424,7 @@ static void draw_banner(void) {
     if (!L[i][0]) continue;
     text_at(t20, x0 + (bw - lcd_textWidth(t20, L[i])) / 2, y, L[i], 1);
     y += h20;
-  } */
+  } 
 }
 
 static void draw_menu(void) {
@@ -439,7 +439,7 @@ static void draw_menu(void) {
 static void redraw(void) {
   lcd_clear_buf();
   draw_board();
-  draw_banner();
+  //draw_banner();
   draw_panel();
   draw_menu();
   lcd_show();

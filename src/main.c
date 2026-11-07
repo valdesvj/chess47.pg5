@@ -887,6 +887,13 @@ static void wait_exit(void) {
 }
 
 static void show_qr(void) {
+          
+  /* QR unavaiable in demo - cheap code to avoid the crash */
+  if (cfg.mode == MODE_CC) {
+    strcpy(status, "QR unavailable in demo");
+    return;
+  }
+
   /* moves only (plus FEN for 960) keeps the code small and scannable */
   char *txt = G->fbuf;
   char *o = txt;

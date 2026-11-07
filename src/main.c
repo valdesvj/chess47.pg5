@@ -427,7 +427,12 @@ static void draw_banner(void) {
 }
 
 static void draw_menu(void) {
-  lcd_draw_menu_keys(promo_mode ? PROMO_MENU : MENU[cfg.page]);
+  const char *keys[6];
+  for (int i = 0; i < 6; i++) keys[i] = MENU[cfg.page][i];
+
+  if (cfg.page == 1 && chess960) keys[0] = "960*";
+
+  lcd_draw_menu_keys(keys);
 }
 
 static void redraw(void) {
@@ -1050,7 +1055,8 @@ static void handle_softkey(int k) {
   case 2:  cfg.flip ^= 1; break;                                                     /* FLIP */
   case 3:  undo(); break;                                                            /* UNDO */
   case 4:  hint(); break;                                                            /* HINT */
-  case 6:  start_960_entry(); break;                                                 /* 960 */
+  case 6: if (chess960) { new_game(-1); strcpy(status, "Normal chess");} 
+          else {  start_960_entry(); } break; /* 960 / normal-chess toggle */                                               /* 960 */
   case 7:  cfg.tc = (int8_t)((cfg.tc + 1) % TC_CNT); clock_reset(); clock_update_live(); /* CLOCK */
            sprintf(status, "Clock %s", TCS[cfg.tc].name); break;
   case 8:  cfg.human ^= 1; cfg.flip = cfg.human; if (!VS_USB) cfg.mode = MODE_HC; sel = NOSQ;    /* SIDE */

@@ -933,33 +933,22 @@ static void wait_exit(void) {
 }
 
 static void show_qr(void) {
-  /* QR unavailable in demo. */
   if (cfg.mode == MODE_CC) {
     strcpy(status, "QR unavailable in demo");
     return;
   }
 
-  /* Include the starting FEN when the game didn't start from the normal
-     initial position, then append the moves. */
-  char *txt = G->fbuf;
-  char *o = txt;
-  size_t remaining = sizeof G->fbuf;
-  int text_ok = 1;
+  /* QR payload is the current position only, not the full game. */
+  char fen[100];
+  pos_to_fen(CUR, fen);
+  int len = (int)strlen(fen);
 
-  if (chess960 || G->hist[0].fullmove != 1) {
-    char fen[100];
-    pos_to_fen(&G->hist[0], fen);
-    text_ok = appendf(&o, &remaining, "[FEN \"%s\"]\n", fen);
-  }
-  if (text_ok)
-    text_ok = build_pgn(o, remaining, 0);
-
-  int len = text_ok ? (int)strlen(txt) : 0;
   QRCode qr;
   uint8_t *buf = NULL;
   int ok = -1;
 
-  for (int version = 1; text_ok && version <= 40; version++) {
+  /* Try small QR versions; FEN is short even after a long game. */
+  for (int version = 1; version <= 10; version++) {
     uint16_t size = qrcode_getBufferSize((uint8_t)version);
     if (size == 0)
       break;
@@ -968,7 +957,7 @@ static void show_qr(void) {
     if (!buf)
       break;
 
-    ok = qrcode_initText(&qr, buf, (uint8_t)version, ECC_LOW, txt);
+    ok = qrcode_initText(&qr, buf, (uint8_t)version, ECC_LOW, fen);
     if (ok == 0)
       break;
 
@@ -988,24 +977,23 @@ static void show_qr(void) {
 
     char s[40];
     int tx = px + 24;
-    text_at(t24, tx, 20, "Game QR", 1);
-    sprintf(s, "%d moves", (G->n + 1) / 2);
+    text_at(t24, tx, 20, "Position QR", 1);
+    sprintf(s, "%d FEN chars  v%d", len, qr.version);
     text_at(t20, tx, 60, s, 0);
-    sprintf(s, "%d chars  v%d", len, qr.version);
-    text_at(t20, tx, 84, s, 0);
     text_at(t20, tx, 120, "Scan with phone,", 0);
     text_at(t20, tx, 142, "paste in lichess", 0);
     text_at(t20, tx, 164, "analysis board.", 0);
     text_at(t20, tx, 210, "EXIT to return", 0);
   } else {
     text_at(t24, 20, 100,
-            text_ok ? "Game too long for QR" : "Game text too long", 0);
+            buf ? "QR generation failed" : "Not enough QR memory", 0);
   }
 
+  /* Keep the QR buffer alive until the LCD has finished refreshing. */
+  lcd_show();
   if (buf)
     free(buf);
 
-  lcd_show();
   wait_exit();
 }
           

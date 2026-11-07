@@ -938,7 +938,7 @@ static void show_qr(void) {
     return;
   }
 
-  /* Encode only the current position, not the move history. */
+  /* Encode current board position, not all game history. */
   char fen[100];
   pos_to_fen(CUR, fen);
   int len = (int)strlen(fen);
@@ -947,7 +947,6 @@ static void show_qr(void) {
   uint8_t *buf = NULL;
   int ok = -1;
 
-  /* Try successively larger QR versions, freeing each failed attempt. */
   for (int v = 1; v <= 40; v++) {
     uint16_t bs = qrcode_getBufferSize((uint8_t)v);
     if (bs == 0) break;
@@ -962,33 +961,30 @@ static void show_qr(void) {
     buf = NULL;
   }
 
-  int qr_ok = buf && ok == 0 && qr.size > 0 && qr.size <= 177;
   lcd_clear_buf();
 
-  if (qr_ok) {
+  if (ok == 0 && buf) {
     int z = (LCD_Y - 16) / qr.size;
     if (z < 1) z = 1;
-
     int px = qr.size * z;
+
     qrcode_disp(&qr, 8, (LCD_Y - px) / 2, z);
 
     char s[40];
     int tx = px + 24;
     text_at(t24, tx, 20, "Position QR", 1);
-    sprintf(s, "%d FEN chars  v%d", len, qr.version);
+    sprintf(s, "%d chars  v%d", len, qr.version);
     text_at(t20, tx, 60, s, 0);
-    text_at(t20, tx, 100, "Scan to copy", 0);
-    text_at(t20, tx, 122, "this position", 0);
+    text_at(t20, tx, 120, "Scan with phone,", 0);
+    text_at(t20, tx, 142, "paste in lichess", 0);
+    text_at(t20, tx, 164, "analysis board.", 0);
     text_at(t20, tx, 210, "EXIT to return", 0);
   } else {
-    const char *msg = !buf ? "QR memory unavailable" : "Cannot make QR code";
-    text_at(t24, 20, 100, msg, 0);
+    text_at(t24, 20, 100, "QR unavailable", 0);
   }
 
-  lcd_show();
-
-  /* Keep the QR workspace alive until the screen has been drawn. */
   if (buf) free(buf);
+  lcd_show();
   wait_exit();
 }
 

@@ -342,7 +342,8 @@ static void draw_panel(void) {
   else if (status[0]) strcpy(s, status);
   else sprintf(s, "%s to move", CUR->side ? "Black" : "White");
   lcd_fill_rect(0, y, BX - 1, h, 0);
-  text_at(t20, 2, y, s, inv);
+  if (inv) lcd_fill_rect(0, y, (uint32_t)lcd_textWidth(t20, s) + 4, h, 1);  /* the result, check: a black bar, */
+  text_at(t20, 2, y, s, inv);                                                /* white text (as the banner was) */
   y += h + 2;
   lcd_fill_rect(2, y, PANEL_W - 4, 1, 1);
   y += 3;
@@ -395,38 +396,6 @@ static void lcd_show(void) {
   lcd_refresh_wait();
 }
 
-/* the end of the game, in a box on the board: what happened, why, the result */
-static void draw_banner(void) {
-  if (!G->over) return;
-  const char *L[3] = { "", "", "" };
-  int loser = CUR->side;
-  const char *win = loser == WHITE ? "Black wins  0-1" : "White wins  1-0";
-  switch (G->over) {
-  case 1: L[0] = "CHECKMATE"; L[2] = win; break;
-  case 2: L[0] = "STALEMATE"; L[1] = "no legal move"; L[2] = "Draw  1/2-1/2"; break;
-  case 3: L[0] = "DRAW"; L[1] = "50-move rule"; L[2] = "1/2-1/2"; break;
-  case 4: L[0] = "DRAW"; L[1] = "no mating material"; L[2] = "1/2-1/2"; break;
-  case 5: L[0] = "DRAW"; L[1] = "3-fold repetition"; L[2] = "1/2-1/2"; break;
-  case 6: L[0] = "TIME"; L[1] = loser == WHITE ? "White's flag fell" : "Black's flag fell"; L[2] = win; break;
-  case 7: L[0] = "RESIGNS"; L[1] = loser == WHITE ? "White resigns" : "Black resigns"; L[2] = win; break;
-  case 8: L[0] = "GAME OVER"; L[1] = end_txt; break;
-  default: return;
-  }
-  int h24 = lh(t24), h20 = lh(t20), n = L[1][0] ? 3 : 2;
-  int bh = h24 + (n - 1) * h20 + 12, bw = BOARD_PX - 8;
-  int x0 = BX + 4, y0 = BY + (BOARD_PX - bh) / 2;
-  lcd_fill_rect((uint32_t)x0 - 2, (uint32_t)y0 - 2, (uint32_t)bw + 4, (uint32_t)bh + 4, 0);   /* a white rim */
-  lcd_fill_rect((uint32_t)x0, (uint32_t)y0, (uint32_t)bw, (uint32_t)bh, 1);
-  int y = y0 + 5;
-  text_at(t24, x0 + (bw - lcd_textWidth(t24, L[0])) / 2, y, L[0], 1);
-  y += h24;
-  for (int i = 1; i < 3; i++) {
-    if (!L[i][0]) continue;
-    text_at(t20, x0 + (bw - lcd_textWidth(t20, L[i])) / 2, y, L[i], 1);
-    y += h20;
-  } 
-}
-
 static void draw_menu(void) {
   if (promo_mode) { lcd_draw_menu_keys(PROMO_MENU); return; }   /* Queen Rook Bishop Knight ... Cancel */
   const char *keys[6];
@@ -439,8 +408,7 @@ static void draw_menu(void) {
 
 static void redraw(void) {
   lcd_clear_buf();
-  draw_board();
-  draw_banner();
+  draw_board();                                /* the result in the status line only: the board stays visible */
   draw_panel();
   draw_menu();
   lcd_show();

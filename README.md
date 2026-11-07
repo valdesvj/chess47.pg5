@@ -35,6 +35,7 @@ To return to Free42: in Chess 47 press **SHIFT 0 (SETUP) → System**, or use
 | **EXIT** | cancel the selection; while the CPU thinks: *move now* |
 | **←** (backspace) | take back (two plies vs the CPU) |
 | **F1…F6** | soft keys (3 pages, `>>` switches page) |
+| **+** or **−** | zoom: the board the full screen height (30 px squares), the soft keys hidden (they still work); again: the normal view |
 | **SHIFT EXIT** | power off. The game is autosaved and resumed at power on |
 | **SHIFT 0** | setup: time/date, beep, USB disk, **System**, About |
 | **SHIFT ←** | resign |

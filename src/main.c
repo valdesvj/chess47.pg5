@@ -23,11 +23,16 @@
 /* ------------------------------------------------------------------ */
 /*  Layout                                                            */
 /* ------------------------------------------------------------------ */
-#define SQPX     26
-#define BX       192
+/* normal: 26 px squares beside the panel, the soft keys below; zoom (+ / -): 30 px squares, the full height of the
+   screen, the panel narrower and no soft keys (they still work) */
+static int zoom;
+#define SQPX     (zoom ? 30 : 26)
+#define BX       (zoom ? 160 : 192)
 #define BY       0
 #define BOARD_PX (8 * SQPX)
-#define PANEL_W  186
+#define PANEL_W  (BX - 6)
+#define GLYPH    (zoom ? 26 : 20)          /* the pieces' drawn size: the 20 px bitmaps, scaled */
+#define MAXSQ    30
 #define DIR      "/CHESS47"
 
 /* ------------------------------------------------------------------ */
@@ -146,7 +151,7 @@ static void sq_name(int sq, char *s) { s[0] = (char)('a' + FILE_OF(sq)); s[1] = 
 /*  Graphics                                                          */
 /* ------------------------------------------------------------------ */
 /* Row renderer: build one pixel row then emit runs with lcd_fill_rect */
-static uint8_t rowbuf[BOARD_PX];
+static uint8_t rowbuf[8 * MAXSQ];
 
 static void emit_row(int x0, int y, const uint8_t *px, int w) {
   int i = 0;
@@ -202,16 +207,23 @@ static void draw_square(int sq) {
   int dark = !((FILE_OF(sq) + RANK_OF(sq)) & 1);
   int pc = p->b[sq];
   int target = is_target(sq);
-  int ox = (SQPX - PIECE_W) / 2, oy = (SQPX - PIECE_H) / 2 + 1;
-  for (int y = 0; y < SQPX; y++) {
-    for (int x = 0; x < SQPX; x++) {
+  const int S = SQPX, E = S - 1, C = S / 2, g = GLYPH;
+  int ox = (S - g) / 2, oy = (S - g) / 2 + 1;
+  for (int y = 0; y < S; y++) {
+    for (int x = 0; x < S; x++) {
       int v = dark ? (((x + y) & 1) == 0 && (y & 1) == 0) : 0;
-      if (pc) { int q = piece_px(pc, x - ox, y - oy); if (q >= 0) v = q; }
+      if (pc) {                                        /* the glyph scaled to g px (nearest pixel) */
+        int gx = x - ox, gy = y - oy;
+        gx = gx < 0 ? -1 : gx * PIECE_W / g;
+        gy = gy < 0 ? -1 : gy * PIECE_H / g;
+        int q = piece_px(pc, gx, gy);
+        if (q >= 0) v = q;
+      }
       /* destination marker: small dot on empty squares, corners on captures */
       if (target) {
-        if (!pc && x >= 11 && x <= 14 && y >= 11 && y <= 14) v = 1;
-        if (pc && ((x < 4 && y < 4 && x + y < 4) || (x > 21 && y < 4 && (25 - x) + y < 4) ||
-                   (x < 4 && y > 21 && x + (25 - y) < 4) || (x > 21 && y > 21 && (25 - x) + (25 - y) < 4))) v = 1;
+        if (!pc && x >= C - 2 && x <= C + 1 && y >= C - 2 && y <= C + 1) v = 1;
+        if (pc && ((x < 4 && y < 4 && x + y < 4) || (x > E - 4 && y < 4 && (E - x) + y < 4) ||
+                   (x < 4 && y > E - 4 && x + (E - y) < 4) || (x > E - 4 && y > E - 4 && (E - x) + (E - y) < 4))) v = 1;
       }
       /* last move: thin frame */
       if ((sq == last_from || sq == last_to) && (x == 0 || y == 0 || x == SQPX - 1 || y == SQPX - 1)) v = 1;
@@ -260,15 +272,27 @@ static void text_at(disp_stat_t *ds, int x, int y, const char *s, int inv) {
 
 static int lh(disp_stat_t *ds) { return lcd_lineHeight(ds); }
 
+/* panel text (t20): cut at the board's edge (the zoomed panel is narrower); highlighted: a black bar, white text */
+static void ptext(int x, int y, const char *s, int inv) {
+  char b[48];
+  snprintf(b, sizeof b, "%s", s);
+  for (size_t n = strlen(b); n && x + lcd_textWidth(t20, b) > BX - 2; ) b[--n] = 0;
+  if (inv && b[0]) {
+    int x0 = x > 2 ? x - 2 : 0;
+    lcd_fill_rect((uint32_t)x0, (uint32_t)y, (uint32_t)(x + lcd_textWidth(t20, b) + 2 - x0), (uint32_t)lcd_lineHeight(t20), 1);
+  }
+  text_at(t20, x, y, b, inv);
+}
+
 static void draw_clock(void) {
   int h = lh(t20) + 2;
   lcd_fill_rect(0, 0, PANEL_W + 4, h, 0);
   if (!cfg.tc) {
-    text_at(t20, 2, 1, "CHESS 47", 1);
+    ptext(2, 1, "CHESS 47", 1);
     char s[16];
     sprintf(s, "%s", chess960 ? (G->pos960 >= 0 ? "960" : "FEN") : "");
     if (G->pos960 >= 0) sprintf(s, "960 #%d", G->pos960);
-    text_at(t20, PANEL_W - lcd_textWidth(t20, s), 1, s, 0);
+    ptext(PANEL_W - lcd_textWidth(t20, s), 1, s, 0);
     return;
   }
   char a[16], b[16];
@@ -277,9 +301,9 @@ static void draw_clock(void) {
   int stm = CUR->side;
   char s[24];
   sprintf(s, " W %s ", a);
-  text_at(t20, 0, 1, s, stm == WHITE && !G->over);
+  ptext(0, 1, s, stm == WHITE && !G->over);
   sprintf(s, " B %s ", b);
-  text_at(t20, PANEL_W / 2 + 2, 1, s, stm == BLACK && !G->over);
+  ptext(PANEL_W / 2 + 2, 1, s, stm == BLACK && !G->over);
   lcd_fill_rect(PANEL_W / 2, 0, 1, h, 1);
 }
 
@@ -329,7 +353,7 @@ static void draw_panel(void) {
   else if (cfg.mode == MODE_USB) sprintf(s, "vs USB  You:%s", cfg.human ? "Black" : "White");
   else if (cfg.mode == MODE_EUSB) sprintf(s, "%s vs USB  CPU:%s", lv, cfg.human ? "Black" : "White");
   else sprintf(s, "%s  You:%s", lv, cfg.human ? "Black" : "White");
-  text_at(t20, 2, y, s, 0);
+  ptext(2, y, s, 0);
   y += h;
 
   /* status line */
@@ -342,8 +366,7 @@ static void draw_panel(void) {
   else if (status[0]) strcpy(s, status);
   else sprintf(s, "%s to move", CUR->side ? "Black" : "White");
   lcd_fill_rect(0, y, BX - 1, h, 0);
-  if (inv) lcd_fill_rect(0, y, (uint32_t)lcd_textWidth(t20, s) + 4, h, 1);  /* the result, check: a black bar, */
-  text_at(t20, 2, y, s, inv);                                                /* white text (as the banner was) */
+  ptext(2, y, s, inv);                        /* the result, check: highlighted (a black bar, white text) */
   y += h + 2;
   lcd_fill_rect(2, y, PANEL_W - 4, 1, 1);
   y += 3;
@@ -363,22 +386,22 @@ static void draw_panel(void) {
     else if (iw < 0) strcpy(w, "...");
     if (iw + 1 >= 0 && iw + 1 < G->n) strcpy(b, G->san[iw + 1]);
     sprintf(s, "%d.", base + ln);
-    text_at(t20, 2, y, s, 0);
-    text_at(t20, 40, y, w, 0);
-    text_at(t20, 112, y, b, 0);
+    ptext(2, y, s, 0);
+    ptext(zoom ? 36 : 40, y, w, 0);
+    ptext(zoom ? 94 : 112, y, b, 0);
     y += h;
   }
 
   /* footer */
   if (cfg.level == 0 && cfg.mode != MODE_HH) {
     draw_bitmap(CRAZY_BMP, CRAZY_W, CRAZY_H, 4, BOARD_PX - 46, 2);
-    text_at(t20, 60, BOARD_PX - 36, "CRAZY!", 1);
+    ptext(60, BOARD_PX - 36, "CRAZY!", 1);
   } else {
     int m = material();
     char c[3]; sq_name(cur, c);
     sprintf(s, "%s  %s%d", c, m > 0 ? "+" : "", m);
     if (cfg.usb) strcat(s, "  USB");
-    text_at(t20, 2, BOARD_PX - h, s, 0);
+    ptext(2, BOARD_PX - h, s, 0);
   }
 }
 
@@ -397,6 +420,7 @@ static void lcd_show(void) {
 }
 
 static void draw_menu(void) {
+  if (zoom && !promo_mode) return;                      /* zoom: the board the full height (the keys still work) */
   if (promo_mode) { lcd_draw_menu_keys(PROMO_MENU); return; }   /* Queen Rook Bishop Knight ... Cancel */
   const char *keys[6];
   for (int i = 0; i < 6; i++) keys[i] = MENU[cfg.page][i];
@@ -1160,6 +1184,7 @@ static void handle_key(int key) {
   if (promo_mode) { if (key == KEY_EXIT) { promo_mode = 0; sel = NOSQ; } return; }
 
   switch (key) {
+  case KEY_ADD: case KEY_SUB: zoom ^= 1; strcpy(status, zoom ? "Zoom: +/- back" : "Normal view"); break;   /* ZOOM */
   case KEY_UP:   case KEY_8: move_cursor(0, 1); break;
   case KEY_DOWN: case KEY_2: move_cursor(0, -1); break;
   case KEY_4: move_cursor(-1, 0); break;

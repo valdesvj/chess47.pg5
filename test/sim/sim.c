@@ -162,7 +162,7 @@ static int parse_key(const char *s) {
   static const struct { const char *n; int k; } map[] = {
     {"F1",KEY_F1},{"F2",KEY_F2},{"F3",KEY_F3},{"F4",KEY_F4},{"F5",KEY_F5},{"F6",KEY_F6},
     {"0",KEY_0},{"1",KEY_1},{"2",KEY_2},{"3",KEY_3},{"4",KEY_4},{"5",KEY_5},{"6",KEY_6},{"7",KEY_7},{"8",KEY_8},{"9",KEY_9},
-    {"ENTER",KEY_ENTER},{"EXIT",KEY_EXIT},{"BSP",KEY_BSP},{"UP",KEY_UP},{"DOWN",KEY_DOWN},{"SHIFT",KEY_SHIFT},{"SIGMA",KEY_SIGMA},
+    {"ENTER",KEY_ENTER},{"EXIT",KEY_EXIT},{"BSP",KEY_BSP},{"UP",KEY_UP},{"DOWN",KEY_DOWN},{"SHIFT",KEY_SHIFT},{"SIGMA",KEY_SIGMA},{"ADD",KEY_ADD},{"SUB",KEY_SUB},
   };
   for (unsigned i = 0; i < sizeof map / sizeof *map; i++) if (!strcmp(map[i].n, s)) return map[i].k;
   return -1;

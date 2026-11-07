@@ -25,15 +25,21 @@ int usbser_write(const void *p, int n) {
 int usbser_puts(const char *s) { return usbser_write(s, (int)strlen(s)); }
 int usbser_read(void *p, int max) {
   static FILE *in;
-  static int done;
-  char line[128];
+  static int done, left, at;
+  static char line[160];
+  if (left) {                                  /* the rest of a long line (a FEN), as the real port gives it */
+    int k = left < max ? left : max;
+    memcpy(p, line + at, (size_t)k); at += k; left -= k;
+    return k;
+  }
   if (!f || done || (!answer && !getenv("ACM_FREE"))) return 0;
   if (!in && !(in = fopen("acm.in", "r"))) { done = 1; return 0; }
-  if (!fgets(line, sizeof line, in)) { done = 1; return 0; }
+  if (!fgets(line, sizeof line - 2, in)) { done = 1; return 0; }
   answer = 0;
   line[strcspn(line, "\r\n")] = 0;
-  int k = snprintf((char *)p, (size_t)max, "%s\r\n", line);
-  return k < max ? k : max;
+  strcat(line, "\r\n");
+  left = (int)strlen(line); at = 0;
+  return usbser_read(p, max);
 }
 void sys_sleep(void);
 void usbser_idle(uint32_t ms) { (void)ms; sys_sleep(); }   /* the sim: the next scripted key (or the end) */

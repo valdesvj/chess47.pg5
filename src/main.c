@@ -938,57 +938,60 @@ static void show_qr(void) {
     return;
   }
 
-  /* Encode the current position only, not the game history. */
+  /* QR payload is the current position, not the full game. */
   char fen[100];
   pos_to_fen(CUR, fen);
-  const char *txt = fen;
-  int len = (int)strlen(txt);
 
   QRCode qr;
   uint8_t *buf = NULL;
-  int ok = -1;
+  int8_t ok = -1;
 
-  /* Keep the existing version search: versions 1 through 40. */
-  for (int v = 1; v <= 40; v++) {
-    uint16_t bs = qrcode_getBufferSize((uint8_t)v);
+  /* One fixed version is enough for a FEN payload. Version 6-L supports ~106 bytes. */
+  uint16_t bs = qrcode_getBufferSize(6);
+  if (bs > 0) {
     buf = malloc(bs);
-    if (!buf)
-      break;
-
-    ok = qrcode_initText(&qr, buf, (uint8_t)v, ECC_LOW, txt);
-    if (ok == 0)
-      break;
-
-    free(buf);
-    buf = NULL;
+    if (buf) {
+      ok = qrcode_initText(&qr, buf, 6, ECC_LOW, fen);
+    }
   }
 
   lcd_clear_buf();
 
   if (ok == 0 && buf) {
-    int z = (LCD_Y - 16) / qr.size;
-    if (z < 1)
-      z = 1;
+    /* Draw the QR manually to avoid calling the SDK's qrcode_disp() helper. */
+    const int quiet = 4;
+    int modules = qr.size + 2 * quiet;
+    int z = (LCD_Y - 16) / modules;
+    if (z < 1) z = 1;
 
-    int px = qr.size * z;
-    //qrcode_disp(&qr, 8, (LCD_Y - px) / 2, z);
+    int px = modules * z;
+    int x0 = 8;
+    int y0 = (LCD_Y - px) / 2;
+
+    for (int y = 0; y < qr.size; y++) {
+      for (int x = 0; x < qr.size; x++) {
+        if (qrcode_getModule(&qr, (uint8_t)x, (uint8_t)y)) {
+          lcd_fill_rect(x0 + (x + quiet) * z,
+                        y0 + (y + quiet) * z,
+                        z, z, 1);
+        }
+      }
+    }
 
     char s[40];
-    int tx = px + 24;
+    int tx = x0 + px + 12;
     text_at(t24, tx, 20, "Position QR", 1);
-    sprintf(s, "%d FEN chars  v%d", len, qr.version);
+    sprintf(s, "%d FEN chars  v%d", (int)strlen(fen), qr.version);
     text_at(t20, tx, 60, s, 0);
-    text_at(t20, tx, 120, "Scan with phone,", 0);
-    text_at(t20, tx, 142, "paste in lichess", 0);
-    text_at(t20, tx, 164, "analysis board.", 0);
+    text_at(t20, tx, 100, "Scan with phone,", 0);
+    text_at(t20, tx, 122, "paste in lichess", 0);
+    text_at(t20, tx, 144, "analysis board.", 0);
     text_at(t20, tx, 210, "EXIT to return", 0);
   } else {
-    text_at(t24, 20, 100, "QR generation failed", 0);
+    text_at(t24, 20, 100, "QR not available", 0);
   }
 
-  if (buf)
-    free(buf);
-
+  if (buf) free(buf);
   lcd_show();
   wait_exit();
 }

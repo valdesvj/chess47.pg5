@@ -280,6 +280,7 @@ def main():
     ap.add_argument('--send', help='press these keys first: names with spaces, e.g. "SHIFT 7 ENTER WAIT:500 F1"')
     ap.add_argument('--c47', help='C47 commands to key in first (tools/c47keys.py): e.g. "2 ENTER 3 + SIN STO 01"')
     ap.add_argument('--c43', help='--c47: the C47 firmware source with the keyboard (default $C43_DIR or ~/opt/c43)')
+    ap.add_argument('--kbd', help='--c47: the keyboard table, kbd_std_NAME of newer firmware (default C47)')
     ap.add_argument('--hold', type=float, default=0.06, help='s a key is held down (default 0.06)')
     ap.add_argument('--gap', type=float, default=0.12, help='s between keys (default 0.12)')
     a = ap.parse_args()
@@ -300,7 +301,7 @@ def main():
             if a.c47:
                 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
                 import c47keys
-                seq = c47keys.translate(a.c47, c47keys.layout(a.c43))
+                seq = c47keys.translate(a.c47, c47keys.layout(a.c43, a.kbd))
                 print('C47:', a.c47, '->', ' '.join(seq))
                 keys.send(seq)
             if a.send:

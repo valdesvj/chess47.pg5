@@ -82,17 +82,21 @@ def braces(text):
     return groups
 
 
-def layout(c43=None):
-    """{name: (key name, shift '' / 'f' / 'g')} from assign.c's kbd_std (and the item names)"""
+def layout(c43=None, kbd=None):
+    """{name: (key name, shift '' / 'f' / 'g')} from assign.c's kbd_std (and the item names). Newer firmware keeps
+    one table per keyboard (kbd_std_C47, _R47f_g, _DM42 ...): kbd picks one (default $C47_KBD or C47)"""
     path = os.path.join(c43_dir(c43), 'src', 'c47', 'assign.c')
     if not os.path.exists(path):
         sys.exit('c47keys: no %s (the C47 firmware source: git clone https://gitlab.com/rpncalculators/c43 ~/opt/c43)'
                  % path)
     src = open(path, encoding='utf-8', errors='replace').read()
     src = re.sub(r'//[^\n]*', '', re.sub(r'/\*.*?\*/', '', src, flags=re.S))
-    m = re.search(r'kbd_std\s*\[[^\]]*\]\s*=\s*\{', src)
+    tables = {mm.group(1) or '': mm for mm in re.finditer(r'kbd_std(?:_(\w+))?\s*\[[^\]]*\]\s*=\s*\{', src)}
+    want = kbd or os.environ.get('C47_KBD') or 'C47'
+    m = tables.get(want) or tables.get('')
     if not m:
-        sys.exit('c47keys: no kbd_std[] in %s' % path)
+        sys.exit('c47keys: no kbd_std[] or kbd_std_%s[] in %s (there: %s; --kbd NAME)'
+                 % (want, path, ', '.join('kbd_std' + ('_' + k if k else '') for k in tables) or 'none'))
     depth, i = 1, m.end()
     while depth:
         depth += {'{': 1, '}': -1}.get(src[i], 0)
@@ -163,11 +167,13 @@ def main():
     ap.add_argument('text', nargs='?', help='C47 commands, e.g. "2 ENTER 3 + SIN STO 01"')
     ap.add_argument('--c43', help='the C47 firmware source (default $C43_DIR or ~/opt/c43)')
     ap.add_argument('--layout', action='store_true', help='print the keyboard as read from assign.c')
+    ap.add_argument('--kbd', help='the keyboard table of newer firmware: kbd_std_NAME (default $C47_KBD or C47; '
+                                  'R47f_g, DM42 ...)')
     ap.add_argument('--find', help='where a command is')
     ap.add_argument('--f', default='SHIFT', help='the keys for f (default SHIFT)')
     ap.add_argument('--g', default='SHIFT SHIFT', help='the keys for g (default SHIFT SHIFT)')
     a = ap.parse_args()
-    lay = layout(a.c43)
+    lay = layout(a.c43, a.kbd)
     if a.layout:
         for key, row in lay['_raw']:
             print('%-6s  %-22s f %-22s g %s' % (key, row[''], row['f'], row['g']))

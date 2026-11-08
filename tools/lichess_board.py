@@ -20,6 +20,8 @@ On the DM42n: Chess 47 (any mode); the script switches it to "You vs USB" and se
   the screen while you play (one program has the port: this one shows it):
     --view               the calculator's screen in this terminal (Braille), the moves and messages under it
     --screen /tmp/dm42.png   a PNG on every change; in another terminal: feh -R 0.5 /tmp/dm42.png
+    --keys               and the PC keyboard types on the calculator: F1-F6 (F4 RESIGN, F5 DRAW), digits,
+                         Enter, Backspace, Esc = EXIT, arrows, Tab = SHIFT, ":NAME" Enter for any key
 
 Board API games must be rapid, classical or correspondence (15+10 is rapid).
 
@@ -125,6 +127,8 @@ def calc_to_board(board, text):
 def main():
     ap = argparse.ArgumentParser(description="Chess 47 on the DM42n as a Lichess board")
     ap.add_argument("--port", default=None)
+    ap.add_argument("--keys", action="store_true",
+                    help="the PC keyboard types on the calculator (F1-F6, digits, Enter, Esc=EXIT, Tab=SHIFT, :NAME)")
     ap.add_argument("--view", action="store_true", help="the calculator's screen in this terminal (Braille), the log under it")
     ap.add_argument("--screen", metavar="PNG", help="the calculator's screen to this PNG on every change (feh -R 0.5 PNG)")
     ap.add_argument("--token", default=os.path.expanduser("~/.config/chess47/lichess.token"))
@@ -160,6 +164,8 @@ def main():
     if a.view:                          # the log goes under the screen
         globals()["print"] = lambda *x, **k: screen.log(" ".join(str(v) for v in x))
     calc = dm42port.Port(port, screen)  # DMCP's serial console (channel 2) or the TinyUSB port; the screen too
+    if a.keys and not dm42port.keyboard(calc, screen):
+        print("--keys: needs the serial port and a terminal")
     q = queue.Queue()
     threading.Thread(target=calc_lines, args=(calc, q), daemon=True).start()
 

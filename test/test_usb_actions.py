@@ -13,16 +13,16 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import dm42port  # noqa: E402
 
 SIM = os.path.join(ROOT, 'build', 'sim')
-START = ['F6', 'F6', 'F4', 'F6'] + ['WAIT:300'] * 8      # USB on (menu page 3), back to page 1; the PC's lines come
+START = ['F6', 'F6', 'F4'] + ['WAIT:300'] * 8            # USB on (menu page 3); the game starts on page 1
 OPENING = ['newgame white', 'play e2e4', 'play e7e5', 'play g1f3', 'play b8c6']
 bad = 0
 
 
-def run(pc, keys):
+def run(pc, keys, start=None):
     """the PC's lines, the keys -> (Chess 47's lines after its hello / newgame / opponent, the menu labels at the end)"""
     d = tempfile.mkdtemp()
     open(os.path.join(d, 'acm.in'), 'w').write('\n'.join(pc) + '\n')
-    subprocess.run([SIM] + START + keys + ['SNAP:end'], cwd=d, env=dict(os.environ, ACM_FREE='1'),
+    subprocess.run([SIM] + (start or START) + keys + ['SNAP:end'], cwd=d, env=dict(os.environ, ACM_FREE='1'),
                    capture_output=True, timeout=120)
     lines = list(dm42port.Port(os.path.join(d, 'acm.out')).lines())
     labels = [f[4] for f in (l.rstrip('\n').split('\t') for l in open(os.path.join(d, 'end.txt'))) if f[3] == '2']
@@ -64,6 +64,11 @@ def main():
     ok(out == ['claim'] and 'CLAIM' in lab, 'the PC: claim on -> CLAIM -> claim', (out, lab))
     out, _ = run(OPENING + ['end Resignation 1-0'], ['F4', 'F4', 'F5'])
     ok(out == [], 'the game over: F4 / F5 send nothing', out)
+    out, lab = run(OPENING, ['F6', 'F6', 'F4', 'F4'], start=['F6', 'F6', 'F4'] + ['WAIT:300'] * 8)
+    ok(out == [] and 'RESIGN' not in lab, 'on menu page 3 during the game: F4 (USB) keeps USB on, sends nothing', (out, lab))
+    out, lab = run(OPENING, ['F4', 'F4'], start=['F6', 'F6', 'F4'] + ['WAIT:300'] * 8)
+    ok(out == ['resign'] and 'RESIGN' in lab, 'USB switched on from page 3: the game starts on page 1, F4 F4 resigns',
+       (out, lab))
     out, lab = run(['newgame white', 'play e2e4', 'play e7e5'], [])
     ok('UNDO' not in lab and 'HINT' not in lab, 'vs USB the menu has no UNDO / HINT', lab)
     print('%d failed' % bad if bad else 'ALL PASSED')

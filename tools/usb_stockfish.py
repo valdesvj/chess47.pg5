@@ -37,6 +37,8 @@ def main():
     ap.add_argument("--side", choices=["white", "black"], default="black",
                     help="Stockfish's colour until the calculator says (opponent white|black)")
     ap.add_argument("--manual", action="store_true", help="print Stockfish's move, you type it (one-way)")
+    ap.add_argument("--keys", action="store_true",
+                    help="the PC keyboard types on the calculator (F1-F6, digits, Enter, Esc=EXIT, Tab=SHIFT, :NAME)")
     ap.add_argument("--view", action="store_true", help="the calculator's screen in this terminal (Braille), the log under it")
     ap.add_argument("--screen", metavar="PNG", help="the calculator's screen to this PNG on every change (feh -R 0.5 PNG)")
     a = ap.parse_args()
@@ -52,6 +54,8 @@ def main():
     if a.view:                                # the log goes under the screen
         globals()["print"] = lambda *x, **k: screen.log(" ".join(str(v) for v in x))
     port = dm42port.Port(a.port, screen)      # DMCP's serial console (channel 2) or the TinyUSB port; the screen too
+    if a.keys and not dm42port.keyboard(port, screen):
+        print("--keys: needs the serial port and a terminal")
 
     def send(s):
         port.send(s)

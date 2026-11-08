@@ -139,7 +139,11 @@ The screen while you play: only one program can have the port, so the bridge sho
 ```bash
 python3 tools/lichess_board.py --ai 3 --view                  # the screen in this terminal, the moves under it
 python3 tools/lichess_board.py --ai 3 --screen /tmp/dm42.png  # a PNG on every change; elsewhere: feh -R 0.5 /tmp/dm42.png
+python3 tools/lichess_board.py --ai 3 --view --keys           # and the PC keyboard types on the calculator
 ```
+
+When the PC starts a game, the calculator's menu goes to page 1 (F4 RESIGN, F5 DRAW). During a USB game the USB key
+(page 3) does not switch USB off.
 
 During a game vs USB, menu page 1 has the game's own actions in place of UNDO and HINT (Lichess's rules):
 

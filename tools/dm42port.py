@@ -46,6 +46,7 @@ class Screen:
         self.dm = dm42view.Dmcp()
         self.png, self.view, self.scale, self.every = png, view, scale, every
         self.logs = collections.deque(maxlen=12)
+        self.status = ''                     # --keys: the last key typed
         self.dirty = False
         self.lock = threading.Lock()
         threading.Thread(target=self._run, daemon=True).start()
@@ -98,8 +99,42 @@ class Screen:
                 sc = max(1, min((cols * 2) // 400, (room * 4) // 240))
                 art = self.V.braille(px, 0, 0, 400, 240, sc) if sc > 1 or room * 4 >= 240 else \
                     self.V.braille(px, 0, 0, 400, 240, 1)[:room]
-                sys.stdout.write('\x1b[H\x1b[2J' + '\n'.join(art) + '\n' + '\n'.join(logs) + '\n')
+                sys.stdout.write('\x1b[H\x1b[2J' + '\n'.join(art) + '\n' + '\n'.join(logs) + '\n' +
+                                 ('[%s]\n' % self.status if self.status else ''))
                 sys.stdout.flush()
+
+
+def keyboard(port, screen=None, hold=0.06, gap=0.12):
+    """--keys: the PC keyboard types on the calculator while a bridge runs (dm42view.py's map: digits . + - * /,
+    Enter, Backspace, Esc = EXIT, arrows, Tab = SHIFT, F1-F6, ':NAME' Enter for any key); a thread; the terminal
+    goes back to normal at the end. Needs DMCP5 3.58's serial console (the TinyUSB build takes no keys)."""
+    import atexit
+    import termios
+    import tty
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import dm42view
+    if not port.tty or not sys.stdin.isatty():
+        return None
+    typing = dm42view.Typing(dm42view.Keys(port.fd, hold, gap))
+    saved = termios.tcgetattr(sys.stdin)
+    atexit.register(termios.tcsetattr, sys.stdin, termios.TCSADRAIN, saved)
+    tty.setcbreak(sys.stdin.fileno())
+
+    def run():
+        while True:
+            data = os.read(sys.stdin.fileno(), 64)
+            if not data:
+                return
+            try:
+                typing.feed(data)
+            except KeyboardInterrupt:                    # Ctrl+C / Ctrl+Q in cbreak mode: end the bridge
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+                os._exit(0)
+            if screen and screen.view:
+                screen.status = typing.status()
+                screen.dirty = True
+    threading.Thread(target=run, daemon=True).start()
+    return typing
 
 
 class Port:

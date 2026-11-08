@@ -1203,7 +1203,11 @@ static void handle_softkey(int k) {
            }
            break;
   case 14: show_qr(); break;                                                         /* QR */
-  case 15: cfg.usb ^= 1;                                                             /* USB */
+  case 15: if (cfg.usb && VS_USB && !G->over) {                                    /* USB (not during a USB game) */
+             strcpy(status, "USB: game on");
+             break;
+           }
+           cfg.usb ^= 1;
            if (cfg.usb) {
              int r = usbser_start("Chess 47");               /* our own serial port (TinyUSB) */
              if (!r) { usbview_on(); strcpy(status, "USB serial ON"); usb_send("\r\nCHESS47 hello\r\n"); }
@@ -1342,6 +1346,7 @@ static int usb_line(const char *l) {
     cfg.flip = cfg.human;
     if (bot) { cfg.tc = 0; usb_hold = 1; usb_left = -1; usb_inc = 0; }   /* the time comes from the PC (clock) */
     sel = NOSQ;
+    cfg.page = 0;                                      /* menu page 1: F4 RESIGN, F5 DRAW (not page 3's USB key) */
     new_game_from(&p, -1);
     return 1;
   }

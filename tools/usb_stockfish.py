@@ -42,8 +42,6 @@ def main():
     ap.add_argument("--view", action="store_true", help="the calculator's screen in this terminal (Braille), the log under it")
     ap.add_argument("--screen", metavar="PNG", help="the calculator's screen to this PNG on every change (feh -R 0.5 PNG)")
     a = ap.parse_args()
-    if not a.port:
-        a.port = dm42port.find()
 
     eng = chess.engine.SimpleEngine.popen_uci(a.engine)
     if a.elo:
@@ -53,7 +51,7 @@ def main():
     screen = dm42port.Screen(a.screen, a.view) if (a.view or a.screen) else None
     if a.view:                                # the log goes under the screen
         globals()["print"] = lambda *x, **k: screen.log(" ".join(str(v) for v in x))
-    port = dm42port.Port(a.port, screen)      # DMCP's serial console (channel 2) or the TinyUSB port; the screen too
+    port = dm42port.Port(a.port, screen, print)   # the serial console (channel 2) or TinyUSB; waits for the port
     if a.keys and not dm42port.keyboard(port, screen):
         print("--keys: needs the serial port and a terminal")
 
@@ -74,69 +72,73 @@ def main():
             print(f"Stockfish: {san}", flush=True)
             send(r.move.uci())                       # pushed when the calculator sends it back
 
-    print(f"Listening on {a.port} ... (Ctrl+C to quit)")
+    print(f"Listening on {port.path} ... (Ctrl+C to quit)")
     frame = False
     try:
-        for line in port.lines():
-            if not line:
-                continue
-            if line.endswith("LCD 400 240"):         # a screen frame (tools/dm42view.py): skip to its END
-                frame = True
-                continue
-            if frame:
-                frame = line != "END"
-                continue
-            if line.startswith("CHESS47"):
-                print("Calculator connected.")
-                continue
-            if line.startswith("newgame"):
-                board = chess.Board(line[len("newgame"):].strip(), chess960=True)
-                print("New game:", board.fen())
+        while True:
+            for line in port.lines():
+                if not line:
+                    continue
+                if line.endswith("LCD 400 240"):         # a screen frame (tools/dm42view.py): skip to its END
+                    frame = True
+                    continue
+                if frame:
+                    frame = line != "END"
+                    continue
+                if line.startswith("CHESS47"):
+                    print("Calculator connected.")
+                    continue
+                if line.startswith("newgame"):
+                    board = chess.Board(line[len("newgame"):].strip(), chess960=True)
+                    print("New game:", board.fen())
+                    think()
+                    continue
+                if line.startswith("opponent"):
+                    sf_white = line.split()[-1] == "white"
+                    print("Stockfish plays", "white" if sf_white else "black")
+                    think()
+                    continue
+                if line.startswith(("result", "illegal", "notyourturn", "over")):
+                    print(line)
+                    continue
+                if line in ("resign", "abort"):                  # the calculator's F4 (RESIGN / ABORT)
+                    if line == "abort":
+                        send("end Aborted")
+                    else:
+                        send("end Resignation " + ("1-0" if sf_white else "0-1"))
+                    print("DM42n:", line)
+                    continue
+                if line == "draw offer":                         # F5: Stockfish agrees only if it is not better
+                    info = eng.analyse(board, chess.engine.Limit(time=min(a.time, 1.0)))
+                    cp = info["score"].pov(chess.WHITE if sf_white else chess.BLACK).score(mate_score=100000)
+                    if cp <= 0 and not board.is_game_over():
+                        send("end Draw agreed 1/2")
+                        print(f"DM42n offers a draw: Stockfish agrees ({cp / 100:+.2f})")
+                    else:
+                        send("drawdeclined")
+                        send("msg Stockfish declines the draw")
+                        print(f"DM42n offers a draw: Stockfish declines ({cp / 100:+.2f})")
+                    continue
+                if line.startswith(("draw ", "claim")):          # accept / decline (Stockfish never offers), claim
+                    continue
+                try:
+                    mv = chess.Move.from_uci(line)
+                except ValueError:
+                    continue
+                if mv not in board.legal_moves:          # the calculator writes castling king->rook: chess960 boards
+                    print("Ignoring", line)
+                    continue
+                who = "Stockfish" if (board.turn == chess.WHITE) == sf_white else "DM42n"
+                if who == "DM42n" or a.manual:
+                    print(f"{who}: {board.san(mv)}")
+                board.push(mv)
+                if board.is_game_over(claim_draw=True):
+                    print("Game over:", board.result(claim_draw=True))
+                    continue
                 think()
-                continue
-            if line.startswith("opponent"):
-                sf_white = line.split()[-1] == "white"
-                print("Stockfish plays", "white" if sf_white else "black")
-                think()
-                continue
-            if line.startswith(("result", "illegal", "notyourturn", "over")):
-                print(line)
-                continue
-            if line in ("resign", "abort"):                  # the calculator's F4 (RESIGN / ABORT)
-                if line == "abort":
-                    send("end Aborted")
-                else:
-                    send("end Resignation " + ("1-0" if sf_white else "0-1"))
-                print("DM42n:", line)
-                continue
-            if line == "draw offer":                         # F5: Stockfish agrees only if it is not better
-                info = eng.analyse(board, chess.engine.Limit(time=min(a.time, 1.0)))
-                cp = info["score"].pov(chess.WHITE if sf_white else chess.BLACK).score(mate_score=100000)
-                if cp <= 0 and not board.is_game_over():
-                    send("end Draw agreed 1/2")
-                    print(f"DM42n offers a draw: Stockfish agrees ({cp / 100:+.2f})")
-                else:
-                    send("drawdeclined")
-                    send("msg Stockfish declines the draw")
-                    print(f"DM42n offers a draw: Stockfish declines ({cp / 100:+.2f})")
-                continue
-            if line.startswith(("draw ", "claim")):          # accept / decline (Stockfish never offers), claim
-                continue
-            try:
-                mv = chess.Move.from_uci(line)
-            except ValueError:
-                continue
-            if mv not in board.legal_moves:          # the calculator writes castling king->rook: chess960 boards
-                print("Ignoring", line)
-                continue
-            who = "Stockfish" if (board.turn == chess.WHITE) == sf_white else "DM42n"
-            if who == "DM42n" or a.manual:
-                print(f"{who}: {board.san(mv)}")
-            board.push(mv)
-            if board.is_game_over(claim_draw=True):
-                print("Game over:", board.result(claim_draw=True))
-                continue
-            think()
+            print("The calculator's port closed: waiting for it (Ctrl+C quits)", flush=True)
+            port.reopen()
+            print("The calculator is back: carry on (its game is still on it unless Chess 47 restarted)", flush=True)
     except KeyboardInterrupt:
         pass
     eng.quit()

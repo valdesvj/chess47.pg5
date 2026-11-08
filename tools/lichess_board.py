@@ -62,10 +62,14 @@ API = "https://lichess.org"
 
 # ---------------------------------------------------------------- the calculator
 def calc_lines(port, out):
-    """the calculator's lines (the screen and DMCP's own lines skipped: tools/dm42port.py) into the queue out"""
-    for line in port.lines():
-        out.put(("calc", line))
-    out.put(("calc-gone", None))
+    """the calculator's lines (the screen and DMCP's own lines skipped: tools/dm42port.py) into the queue out;
+    when the port closes, calc-gone, then the port waited for and reopened, calc-back"""
+    while True:
+        for line in port.lines():
+            out.put(("calc", line))
+        out.put(("calc-gone", None))
+        port.reopen()
+        out.put(("calc-back", None))
 
 
 # ---------------------------------------------------------------- Lichess
@@ -153,17 +157,16 @@ def main():
     token = os.environ.get("LICHESS_TOKEN") or (open(a.token).read().strip() if os.path.exists(a.token) else "")
     if not token:
         sys.exit("no Lichess token: see the setup at the top of this file")
-    port = a.port or dm42port.find()
     li = Lichess(token)
     acct = li.get("/api/account")
     me = acct["id"]
     if a.bot and acct.get("title") != "BOT":
         sys.exit(f"{me} is not a BOT account: see --bot at the top of this file")
-    print(f"Lichess: {me}{' (BOT, level %d)' % a.level if a.bot else ''}   calculator: {port}")
+    print(f"Lichess: {me}{' (BOT, level %d)' % a.level if a.bot else ''}   calculator: {a.port or dm42port.find()}")
     screen = dm42port.Screen(a.screen, a.view) if (a.view or a.screen) else None
     if a.view:                          # the log goes under the screen
         globals()["print"] = lambda *x, **k: screen.log(" ".join(str(v) for v in x))
-    calc = dm42port.Port(port, screen)  # DMCP's serial console (channel 2) or the TinyUSB port; the screen too
+    calc = dm42port.Port(a.port, screen, print)   # the serial console (channel 2) or TinyUSB; waits for it
     if a.keys and not dm42port.keyboard(calc, screen):
         print("--keys: needs the serial port and a terminal")
     q = queue.Queue()
@@ -210,6 +213,18 @@ def main():
             send("drawdeclined")
             print("Our draw offer was declined")
         offers["mine"], offers["theirs"] = mine, theirs
+    start = {"fen": "startpos"}
+
+    def catch_up():
+        """the game on the calculator: its start, then every move so far (a new game, or after a reconnection)"""
+        if a.bot:
+            send(f"level {a.level}")
+        send(f"{'botgame' if a.bot else 'newgame'} {'white' if me_white else 'black'}"
+             + ("" if start["fen"] == "startpos" else " " + start["fen"]))
+        time.sleep(0.3)
+        for mv in board.move_stack:
+            send("play " + mv.uci())
+
     ENDS = {"mate": "Checkmate", "resign": "Resignation", "timeout": "Left the game", "outoftime": "Time out",
             "draw": "Draw", "stalemate": "Stalemate", "aborted": "Aborted", "noStart": "No start"}
 
@@ -285,18 +300,14 @@ def main():
             opp = v["black" if me_white else "white"]
             name = opp.get("name") or ("AI level %s" % opp.get("aiLevel", "?"))
             fen = v.get("initialFen", "startpos")
+            start["fen"] = fen
             board = chess.Board() if fen == "startpos" else chess.Board(fen)
             inc = (v.get("clock") or {}).get("increment", 0)
-            if a.bot:
-                send(f"level {a.level}")
-            send(f"{'botgame' if a.bot else 'newgame'} {'white' if me_white else 'black'}"
-                 + ("" if fen == "startpos" else " " + fen))
-            time.sleep(0.3)
             st = v["state"]
             moves = st["moves"].split() if st["moves"] else []
-            for u in moves:                                  # catch the calculator up
-                send("play " + u)
+            for u in moves:
                 board.push_uci(u)
+            catch_up()
             side = 'white' if me_white else 'black'
             print(f"{'Chess 47 plays' if a.bot else 'You play'} {side} against {name} ({opp.get('rating', '-')})")
             send(f"msg vs {name} {opp.get('rating', '')}".strip())
@@ -333,7 +344,13 @@ def main():
         elif tag.endswith("-error"):
             print(tag, v)
         elif tag == "calc-gone":
-            sys.exit("the calculator's port closed")
+            print("The calculator's port closed: waiting for it (the Lichess game and its clock go on; Ctrl+C quits)")
+        elif tag == "calc-back":
+            if game is not None and not board.is_game_over():
+                print("The game back on the calculator:", len(board.move_stack), "moves")
+                catch_up()
+                if a.bot:
+                    send("go")
 
 
 if __name__ == "__main__":

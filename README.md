@@ -142,6 +142,10 @@ python3 tools/lichess_board.py --ai 3 --screen /tmp/dm42.png  # a PNG on every c
 python3 tools/lichess_board.py --ai 3 --view --keys           # and the PC keyboard types on the calculator
 ```
 
+The bridges wait for the calculator when its port is not there (USB off, the cable out), and when the port closes
+during a game they wait for it again (a new /dev/ttyACM* too) and put the game back on the calculator: the Lichess
+game and its clock go on meanwhile. Ctrl+C quits.
+
 When the PC starts a game, the calculator's menu goes to page 1 (F4 RESIGN, F5 DRAW). During a USB game the USB key
 (page 3) does not switch USB off.
 

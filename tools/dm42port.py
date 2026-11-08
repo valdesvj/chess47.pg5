@@ -116,6 +116,7 @@ def keyboard(port, screen=None, hold=0.06, gap=0.12):
     if not port.tty or not sys.stdin.isatty():
         return None
     typing = dm42view.Typing(dm42view.Keys(port.fd, hold, gap))
+    port.typing = typing
     saved = termios.tcgetattr(sys.stdin)
     atexit.register(termios.tcsetattr, sys.stdin, termios.TCSADRAIN, saved)
     tty.setcbreak(sys.stdin.fileno())
@@ -127,6 +128,8 @@ def keyboard(port, screen=None, hold=0.06, gap=0.12):
                 return
             try:
                 typing.feed(data)
+            except OSError:                              # the port is closed just now: the key is lost
+                pass
             except KeyboardInterrupt:                    # Ctrl+C / Ctrl+Q in cbreak mode: end the bridge
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
                 os._exit(0)
@@ -138,31 +141,75 @@ def keyboard(port, screen=None, hold=0.06, gap=0.12):
 
 
 class Port:
-    def __init__(self, path, screen=None):
-        self.path = path
+    """path None: the DM42n wherever it is (find(), again after every reconnection). The port is waited for when
+    it is not there (the calculator's USB off, the cable out): Ctrl+C stops the wait."""
+
+    def __init__(self, path, screen=None, say=print):
+        self.want = path
         self.screen = screen
-        if os.path.exists(path) and not path.startswith('/dev/'):     # a recorded stream (the simulator's acm.out)
+        self.say = say
+        self.typing = None                               # keyboard(): its keys follow a reopened port
+        self.fd = None
+        self.tty = True
+        if path and os.path.exists(path) and not path.startswith('/dev/'):     # a recorded stream (acm.out)
+            self.path = path
             self.fd = os.open(path, os.O_RDONLY)
             self.tty = False
         else:
-            self.fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
-            t = termios.tcgetattr(self.fd)
-            t[0] = 0; t[1] = 0; t[3] = 0                 # raw: no echo back, no line editing, no translation
-            t[2] |= termios.CLOCAL | termios.CREAD
-            termios.tcsetattr(self.fd, termios.TCSANOW, t)
-            self.tty = True
+            self._open()
         self.console = False                             # seen a channel byte: DMCP's serial console
         self.ch = 0
+
+    def _open(self):
+        told = False
+        while True:
+            self.path = self.want or find()
+            try:
+                self.fd = os.open(self.path, os.O_RDWR | os.O_NOCTTY)
+                break
+            except (FileNotFoundError, OSError) as ex:
+                if isinstance(ex, PermissionError):
+                    raise SystemExit('no access to %s: add yourself to the uucp (Arch) or dialout (Debian) group'
+                                     % self.path)
+                if not told:
+                    self.say('Waiting for the calculator on %s: press >> >> USB on the DM42n (Ctrl+C quits)'
+                             % (self.want or '/dev/ttyACM*'))
+                    told = True
+                time.sleep(1)
+        t = termios.tcgetattr(self.fd)
+        t[0] = 0; t[1] = 0; t[3] = 0                     # raw: no echo back, no line editing, no translation
+        t[2] |= termios.CLOCAL | termios.CREAD
+        termios.tcsetattr(self.fd, termios.TCSANOW, t)
+        if told:
+            self.say('The calculator is back on %s' % self.path)
+
+    def reopen(self):
+        """after the port closed: wait for it again (a new /dev/ttyACM* too)"""
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        time.sleep(1)
+        self._open()
+        self.console, self.ch = False, 0
+        if self.typing:
+            self.typing.keys.fd = self.fd
 
     def send(self, line):
         """one line to Chess 47: 0x12 first (the serial console's channel 2; dropped by the TinyUSB build)"""
         if self.tty:
-            os.write(self.fd, bytes([0x10 + CH]) + line.encode('ascii') + b'\n')
+            try:
+                os.write(self.fd, bytes([0x10 + CH]) + line.encode('ascii') + b'\n')
+            except OSError:                              # the port just closed: lines() ends, then reopen()
+                pass
 
     def ask_screen(self):
         """the whole screen from DMCP (L on channel 0): asked once when a Screen is attached"""
         if self.tty:
-            os.write(self.fd, b'\x10L\n')
+            try:
+                os.write(self.fd, b'\x10L\n')
+            except OSError:
+                pass
 
     def lines(self):
         """Chess 47's lines; ends when the port closes (the cable out) or the file ends"""
@@ -172,7 +219,10 @@ class Port:
         if self.screen:
             self.ask_screen()
         while True:
-            chunk = os.read(self.fd, 4096)
+            try:
+                chunk = os.read(self.fd, 4096)
+            except OSError:                              # the device went away (USB off, the cable out)
+                return
             if not chunk:
                 return
             for b in chunk:

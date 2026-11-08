@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """dm42view.py - the DM42n's screen in your terminal (or as PNG), sent over USB: NAV47 (>> >> USB) with DMCP5 3.58's
-serial console (DMCP streams the LCD rows; the default build of NAV47 and Chess 47), or over their own TinyUSB port.
+serial console (DMCP streams the LCD rows; the default build), or NAV47 / Chess 47 over their own TinyUSB port.
 
     python3 tools/dm42view.py                     # the DM42n (found by name), Braille dots: 200 x 60 characters
     python3 tools/dm42view.py /dev/ttyACM1        # or a given port
@@ -12,6 +12,9 @@ serial console (DMCP streams the LCD rows; the default build of NAV47 and Chess 
                                                   # a live picture instead of text: one PNG, rewritten each screen
 
     python3 tools/dm42view.py --raw               # also every line received (channel, text, binary bytes): checking
+    python3 tools/dm42view.py --keys              # and the PC keyboard types on the DM42n (serial console)
+    python3 tools/dm42view.py --send "SHIFT 7 ENTER"   # press these keys (then exit; --keys / --once to stay)
+    python3 tools/dm42view.py --c47 "2 ENTER 3 + SIN STO 01" --once --png .   # C47 commands keyed in (c47keys.py)
     python3 tools/dm42view.py acm.out --once --png .   # the simulator's stream (make sim; build/sim ... HOSTL)
 
 The format is found by itself:
@@ -82,12 +85,12 @@ class Dmcp:
         return False
 
 
-def frames(path, raw=False, wait=0.08):
+def frames(path, raw=False, wait=0.08, opened=None, typing=None):
     """The frames from the serial port (or a file of them), in either format:
     DMCP5 3.58's serial console (NAV47 make USB=sercon): the LCD rows on channel 0; a frame when the rows stop coming
     for `wait` seconds. NAV47 / Chess 47 over TinyUSB (make USB=tinyusb): "NAV47 LCD 400 240", 240 hex lines, "END"."""
     import select
-    f, fd = open_port(path)
+    f, fd = opened or open_port(path)
     d = Dmcp(raw)
     if fd is not None:                                  # ask DMCP who is there, and for the whole screen
         os.write(fd, b'\x10V\n\x10L\n')
@@ -97,7 +100,12 @@ def frames(path, raw=False, wait=0.08):
     dirty = False
     while True:
         if fd is not None:
-            r, _, _ = select.select([fd], [], [], wait)
+            r, _, _ = select.select([fd] + ([sys.stdin] if typing else []), [], [], wait)
+            if typing and sys.stdin in r:                # --keys: the PC keyboard
+                typing.feed(os.read(sys.stdin.fileno(), 64))
+                r = [x for x in r if x is not sys.stdin]
+                if not r:
+                    continue
             chunk = os.read(fd, 65536) if r else b''
             if not r and dirty:
                 dirty = False
@@ -134,6 +142,107 @@ def frames(path, raw=False, wait=0.08):
                 buf.append(b)
 
 
+# ---------------------------------------------------------------- the keys (DMCP5 3.58's serial console, channel 0)
+# DMCP's key codes (dmcp.h): the DM42n's keys, top-left to bottom-right, F1-F6 above them
+KEYS = {'SIGMA': 1, 'INV': 2, 'SQRT': 3, 'LOG': 4, 'LN': 5, 'XEQ': 6, 'STO': 7, 'RCL': 8, 'RDN': 9, 'SIN': 10,
+        'COS': 11, 'TAN': 12, 'ENTER': 13, 'SWAP': 14, 'CHS': 15, 'E': 16, 'BSP': 17, 'UP': 18, '7': 19, '8': 20,
+        '9': 21, 'DIV': 22, 'DOWN': 23, '4': 24, '5': 25, '6': 26, 'MUL': 27, 'SHIFT': 28, '1': 29, '2': 30, '3': 31,
+        'SUB': 32, 'EXIT': 33, '0': 34, 'DOT': 35, 'RUN': 36, 'ADD': 37,
+        'F1': 38, 'F2': 39, 'F3': 40, 'F4': 41, 'F5': 42, 'F6': 43}
+ALIAS = {'+': 'ADD', '-': 'SUB', '*': 'MUL', '/': 'DIV', '.': 'DOT', 'EEX': 'E', 'R/S': 'RUN', 'RS': 'RUN',
+         'X<>Y': 'SWAP', 'XY': 'SWAP', 'RDOWN': 'RDN', 'R↓': 'RDN', '1/X': 'INV', 'SUM': 'SIGMA', 'Σ+': 'SIGMA',
+         'BACK': 'BSP', '←': 'BSP', 'ESC': 'EXIT', 'F': 'SHIFT'}
+
+
+def key_code(name):
+    """a key name (ENTER, 7, SHIFT, F1, +, ...) -> DMCP's key code; 'SHIFT+UP' -> two keys held together"""
+    n = name.upper()
+    if '+' in n and len(n) > 1:
+        a, b = n.split('+', 1)
+        return (key_code(b) << 8) | key_code(a)                      # KPhhhh: k1 the low byte
+    n = ALIAS.get(n, n)
+    if n not in KEYS:
+        raise ValueError('unknown key %r (keys: %s)' % (name, ' '.join(KEYS)))
+    return KEYS[n]
+
+
+class Keys:
+    """presses keys through DMCP's channel 0: KPhh (held down) ... KR (released), as DMCP's own commands"""
+
+    def __init__(self, fd, hold=0.06, gap=0.12):
+        self.fd, self.hold, self.gap = fd, hold, gap
+
+    def press(self, code):
+        hexa = '%04X' % code if code > 0xFF else '%02X' % code
+        os.write(self.fd, b'\x10KP' + hexa.encode() + b'\n')
+        time.sleep(self.hold)
+        os.write(self.fd, b'\x10KR\n')
+        time.sleep(self.gap)
+
+    def send(self, tokens):
+        """key names; WAIT:ms waits"""
+        for t in tokens:
+            if t.upper().startswith('WAIT:'):
+                time.sleep(int(t[5:]) / 1000.0)
+            else:
+                self.press(key_code(t))
+
+
+# the PC keyboard in --keys: digits, . + - * /, Enter, Backspace, Esc (EXIT), the arrows (UP DOWN), Tab (SHIFT),
+# F1-F6; ':' then a key name and Enter for any other key (:SIN, :STO, :XEQ, :SHIFT+UP ...); Ctrl+C or Ctrl+Q ends
+PCKEYS = {b'\r': 'ENTER', b'\n': 'ENTER', b'\x7f': 'BSP', b'\x08': 'BSP', b'\t': 'SHIFT', b'\x1b': 'EXIT',
+          b'\x1b[A': 'UP', b'\x1b[B': 'DOWN', b'\x1bOP': 'F1', b'\x1bOQ': 'F2', b'\x1bOR': 'F3', b'\x1bOS': 'F4',
+          b'\x1b[15~': 'F5', b'\x1b[17~': 'F6', b'\x1b[11~': 'F1', b'\x1b[12~': 'F2', b'\x1b[13~': 'F3',
+          b'\x1b[14~': 'F4', b'+': 'ADD', b'-': 'SUB', b'*': 'MUL', b'/': 'DIV', b'.': 'DOT', b',': 'DOT',
+          b'e': 'E', b'E': 'E'}
+PCKEYS.update({str(d).encode(): str(d) for d in range(10)})
+
+
+class Typing:
+    """--keys: the PC keyboard -> the DM42n's keys"""
+
+    def __init__(self, keys):
+        self.keys = keys
+        self.name = None                                 # after ':': a key name being typed
+        self.last = ''
+
+    def feed(self, data):
+        i = 0
+        while i < len(data):
+            if data[i] in (3, 17):                       # Ctrl+C, Ctrl+Q
+                raise KeyboardInterrupt
+            if self.name is not None:
+                c = data[i:i + 1]
+                i += 1
+                if c in (b'\r', b'\n'):
+                    try:
+                        self.keys.press(key_code(self.name)); self.last = self.name.upper()
+                    except ValueError:
+                        self.last = '%s? no such key' % self.name
+                    self.name = None
+                elif c in (b'\x7f', b'\x08'):
+                    self.name = self.name[:-1]
+                elif c == b'\x1b':
+                    self.name = None
+                else:
+                    self.name += c.decode('ascii', 'ignore')
+                continue
+            if data[i:i + 1] == b':':
+                self.name = ''; i += 1
+                continue
+            for n in (5, 3, 1):                          # the longest known sequence first (escape sequences)
+                k = PCKEYS.get(data[i:i + n])
+                if k:
+                    self.keys.press(KEYS[k]); self.last = k
+                    i += n
+                    break
+            else:
+                i += 1
+
+    def status(self):
+        return (':' + self.name + '_') if self.name is not None else ('key ' + self.last if self.last else '')
+
+
 def braille(px, x0, y0, w, h, scale):
     """Unicode Braille: 2 x 4 dots a character; scale > 1 repeats each pixel."""
     out = []
@@ -165,6 +274,14 @@ def main():
     ap.add_argument('--quiet', action='store_true', help='no picture in the terminal (with --png / --latest)')
     ap.add_argument('--raw', action='store_true', help='print every line received (channel, ASCII part, binary bytes)')
     ap.add_argument('--wait', type=float, default=0.08, help='serial console: a frame after this many s without rows')
+    ap.add_argument('--keys', action='store_true',
+                    help='type on the DM42n: digits . + - * / Enter Backspace Esc(EXIT) arrows Tab(SHIFT) F1-F6; '
+                         '":NAME" Enter for any key (:SIN :STO :XEQ :SHIFT+UP); Ctrl+C ends')
+    ap.add_argument('--send', help='press these keys first: names with spaces, e.g. "SHIFT 7 ENTER WAIT:500 F1"')
+    ap.add_argument('--c47', help='C47 commands to key in first (tools/c47keys.py): e.g. "2 ENTER 3 + SIN STO 01"')
+    ap.add_argument('--c43', help='--c47: the C47 firmware source with the keyboard (default $C43_DIR or ~/opt/c43)')
+    ap.add_argument('--hold', type=float, default=0.06, help='s a key is held down (default 0.06)')
+    ap.add_argument('--gap', type=float, default=0.12, help='s between keys (default 0.12)')
     a = ap.parse_args()
     if not a.port:                                  # the DM42n by name: ttyACM0, ACM1 ... whichever it got
         import glob
@@ -173,8 +290,29 @@ def main():
         print('port', a.port)
     x0, y0, w, h = map(int, a.zoom.split(',')) if a.zoom else (0, 0, W, H)
     n = 0
+    opened = typing = term = None
     try:
-        for px, dm in frames(a.port, a.raw, a.wait):
+        if a.keys or a.send or a.c47:                    # the keys go over DMCP5 3.58's serial console
+            opened = open_port(a.port)
+            if opened[1] is None:
+                sys.exit('--keys / --send / --c47 need the serial port, not a file')
+            keys = Keys(opened[1], a.hold, a.gap)
+            if a.c47:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import c47keys
+                seq = c47keys.translate(a.c47, c47keys.layout(a.c43))
+                print('C47:', a.c47, '->', ' '.join(seq))
+                keys.send(seq)
+            if a.send:
+                keys.send(a.send.split())
+            if not (a.keys or a.once or a.png or a.latest):
+                return
+            if a.keys:
+                import termios, tty
+                term = termios.tcgetattr(sys.stdin)
+                tty.setcbreak(sys.stdin.fileno())
+                typing = Typing(keys)
+        for px, dm in frames(a.port, a.raw, a.wait, opened, typing):
             n += 1
             if not a.quiet:
                 cols, lines = shutil.get_terminal_size((200, 62))
@@ -185,7 +323,8 @@ def main():
                     art = braille(px, x0, y0, w, h, scale)
                 sys.stdout.write('\x1b[H\x1b[2J' + '\n'.join(art) + '\n')
             sys.stdout.write(time.strftime('%H:%M:%S') + '  frame %d' % n +
-                             ('  serial console, %d rows  %s' % (dm.rows, dm.ident or '') if dm else '  TinyUSB') + '\n')
+                             ('  serial console, %d rows  %s' % (dm.rows, dm.ident or '') if dm else '  TinyUSB') +
+                             ('   [%s]' % typing.status() if typing else '') + '\n')
             sys.stdout.flush()
             if a.png or a.latest:
                 from PIL import Image
@@ -213,6 +352,10 @@ def main():
         sys.exit('%s not found: on the DM42n press >> >> USB in NAV47 or Chess 47 (the USB cable connected)' % a.port)
     except OSError as ex:
         sys.exit('%s: %s' % (a.port, ex))
+    finally:
+        if term is not None:
+            import termios
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, term)
 
 
 if __name__ == '__main__':

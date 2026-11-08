@@ -3,6 +3,9 @@
 # Based on the SwissMicros DMCP5_SDK Makefile (BSD-3)
 ######################################
 TARGET = CHESS47
+# make                 the USB through DMCP5 3.58's serial console (needs DMCP5 3.58: the .pg5 has IFC 18)
+# make USB=tinyusb     our own TinyUSB serial port (any DMCP5)
+# make sim             the PC simulator (build/sim); make sim USB=tinyusb for the TinyUSB stand-in
 
 ifdef DEBUG
 DEBUG = 1
@@ -18,13 +21,19 @@ C_INCLUDES += -Idmcp -Isrc -Isrc/usb -Ithird_party/tinyusb/src
 C_SOURCES  += dmcp/sys/pgm_syscalls.c
 ASM_SOURCES = dmcp/startup_pgm.s
 
-C_SOURCES += src/main.c src/engine.c src/usbview.c
-
+USB ?= sercon
+C_SOURCES += src/main.c src/engine.c
+ifeq ($(USB),sercon)
+# DMCP5 3.58's serial console (IFC 18): the moves on channel 2, the screen streamed by DMCP (no TinyUSB)
+C_SOURCES += src/sercon.c
+C_DEFS += -DPLATFORM_IFC_VER=18
+else
 # the USB serial port (our own, with TinyUSB: the firmware's usb_acm_on leaves the port disconnected)
 TUSB = third_party/tinyusb/src
-C_SOURCES += src/usb/usbser.c src/usb/usb_desc.c \
+C_SOURCES += src/usbview.c src/usb/usbser.c src/usb/usb_desc.c \
              $(TUSB)/tusb.c $(TUSB)/common/tusb_fifo.c $(TUSB)/device/usbd.c $(TUSB)/class/cdc/cdc_device.c \
              $(TUSB)/portable/synopsys/dwc2/dcd_dwc2.c $(TUSB)/portable/synopsys/dwc2/dwc2_common.c
+endif
 
 #######################################
 # Toolchain
@@ -88,3 +97,11 @@ clean:
 -include $(shell mkdir .dep 2>/dev/null) $(wildcard .dep/*)
 
 .PHONY: clean all test
+
+# the PC simulator: real main.c + engine.c against a fake DMCP layer (test/sim); its USB writes ./acm.out, reads ./acm.in
+SIM_USB = $(if $(filter sercon,$(USB)),src/sercon.c test/sim/sercon_sim.c,src/usbview.c test/sim/usbser_sim.c)
+sim:
+	mkdir -p $(BUILD_DIR)
+	gcc -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' -DCHESS47_SIM \
+	    -Itest/sim -Isrc -Isrc/usb -o $(BUILD_DIR)/sim test/sim/sim.c src/main.c src/engine.c $(SIM_USB)
+.PHONY: sim

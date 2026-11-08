@@ -572,11 +572,13 @@ static uint32_t last_draw;
 
 static int deferred_key = -1;   /* key pressed while the CPU was thinking */
 
+static int full_redraw;   /* the PC asked for the whole screen (the serial console's key 77) */
 static int poll_cb(void) {
   int stop = 0;
   while (!key_empty()) {
     int k = key_pop();
     if (k <= 0) continue;                                   /* key release */
+    if (k == USBVIEW_KEY_REDRAW) { full_redraw = 1; continue; }   /* the PC wants the screen: after the search */
     if (k == KEY_EXIT || k == KEY_ENTER || k == KEY_5) { stop = 1; continue; }  /* move now */
     if (deferred_key < 0) deferred_key = k;                 /* handle it after the move */
     if (cfg.mode == MODE_CC) stop = 1;                      /* demo: any key interrupts */
@@ -1401,9 +1403,11 @@ void program_main(void) {
 
     if (!key_empty()) reset_auto_off();
     int key = key_pop();
-    if (key > 0) {
+    if (key == USBVIEW_KEY_REDRAW) full_redraw = 1;         /* DMCP's serial console: the PC sent L */
+    else if (key > 0) {
       handle_key(key);
       redraw();
     }
+    if (full_redraw) { full_redraw = 0; redraw(); usbview_redraw_request(); }
   }
 }

@@ -3,7 +3,8 @@
  * a fake DMCP5 layer and renders the 400x240 LCD.
  *
  * usage: sim KEY KEY ... SNAP:name ...
- *   keys: F1..F6 0..9 ENTER EXIT BSP UP DOWN SHIFT SIGMA, WAIT:ms (fake time)
+ *   keys: F1..F6 0..9 ENTER EXIT BSP UP DOWN SHIFT SIGMA, WAIT:ms (fake time); HOSTL: the PC sends L on the
+ *         serial console (DMCP marks every row unsent and gives the program key 77)
  *   SNAP:name writes name.pbm (framebuffer) and name.txt (text draw list)
  * Text is drawn later by render.py with a real font; widths here are fixed.
  */
@@ -31,10 +32,13 @@ static int real_time = 1;
 
 /* ---------------- LCD ---------------- */
 void lcd_clear_buf(void) { memset(fb, 0, sizeof fb); ntxt = 0; }
-void lcd_refresh(void) {}
+/* a refresh: DMCP's serial console sends the changed rows (test/sim/sercon_sim.c; nothing in the TinyUSB sim) */
+__attribute__((weak)) void sim_lcd_out(int forced) { (void)forced; }
+__attribute__((weak)) void sim_host_L(void) {}
+void lcd_refresh(void) { sim_lcd_out(0); }
 void lcd_refresh_wait(void) {}
-void lcd_refresh_lines(int ln, int cnt) { (void)ln; (void)cnt; }
-void lcd_forced_refresh(void) {}
+void lcd_refresh_lines(int ln, int cnt) { (void)ln; (void)cnt; sim_lcd_out(0); }
+void lcd_forced_refresh(void) { sim_lcd_out(1); }
 void lcd_set_buf_cleared(int v) { (void)v; }
 int  lcd_get_buf_cleared(void) { return 0; }
 void LCD_power_on(void) {}
@@ -174,6 +178,7 @@ static void fill(void) {
     const char *t = script[spos++];
     if (!strncmp(t, "SNAP:", 5)) snap(t + 5);
     else if (!strncmp(t, "WAIT:", 5)) { fake_ms += (uint32_t)atoi(t + 5); idle = 1; return; }
+    else if (!strcmp(t, "HOSTL")) { sim_host_L(); pending = 77; }
     else pending = parse_key(t);
   }
 }

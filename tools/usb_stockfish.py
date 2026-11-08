@@ -6,7 +6,8 @@ On the DM42n: Chess 47, menu page 3 -> MODE until "You vs USB" (it switches USB 
 On Linux:     python3 tools/usb_stockfish.py [port] [--elo 2000] [--time 2]
 
 The calculator sends:   CHESS47 hello / newgame <FEN> / opponent white|black / every move (e2e4) / result ...
-                        and the screen frames for tools/dm42view.py (skipped here)
+                        and the screen (skipped here: tools/dm42view.py shows it)
+Over DMCP5 3.58's serial console (the default build) the lines are on channel 2: tools/dm42port.py does that.
 This script sends:      Stockfish's move (e7e5) when it is the USB side's turn; the calculator plays it and sends
                         it back, which confirms it. "msg <text>" shows a text on the calculator.
 --manual: the old one-way way: Stockfish's move is printed and you type it on the calculator ("2 players" mode).
@@ -18,29 +19,11 @@ import shutil
 import sys
 import termios
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dm42port  # noqa: E402
+
 import chess
 import chess.engine
-
-
-def open_port(path):
-    fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
-    t = termios.tcgetattr(fd)
-    t[0] = 0; t[1] = 0; t[3] = 0                     # raw: no echo back to the calculator, no line editing
-    t[2] |= termios.CLOCAL | termios.CREAD
-    termios.tcsetattr(fd, termios.TCSANOW, t)
-    return fd
-
-
-def lines(fd):
-    buf = b''
-    while True:
-        chunk = os.read(fd, 4096)
-        if not chunk:
-            return
-        buf += chunk
-        while b'\n' in buf:
-            line, buf = buf.split(b'\n', 1)
-            yield line.strip().decode('ascii', 'replace')
 
 
 def main():
@@ -54,18 +37,17 @@ def main():
     ap.add_argument("--manual", action="store_true", help="print Stockfish's move, you type it (one-way)")
     a = ap.parse_args()
     if not a.port:
-        found = sorted(glob.glob('/dev/serial/by-id/*SwissMicros_DM42n*'))
-        a.port = found[0] if found else '/dev/ttyACM0'
+        a.port = dm42port.find()
 
     eng = chess.engine.SimpleEngine.popen_uci(a.engine)
     if a.elo:
         eng.configure({"UCI_LimitStrength": True, "UCI_Elo": a.elo})
     sf_white = a.side == "white"
     board = chess.Board()
-    fd = open_port(a.port)
+    port = dm42port.Port(a.port)              # DMCP's serial console (channel 2) or the TinyUSB port
 
     def send(s):
-        os.write(fd, (s + "\r\n").encode())
+        port.send(s)
 
     def think():
         if board.is_game_over(claim_draw=True):
@@ -84,7 +66,7 @@ def main():
     print(f"Listening on {a.port} ... (Ctrl+C to quit)")
     frame = False
     try:
-        for line in lines(fd):
+        for line in port.lines():
             if not line:
                 continue
             if line.endswith("LCD 400 240"):         # a screen frame (tools/dm42view.py): skip to its END

@@ -39,6 +39,7 @@ static void learn(void) {
   ok = (kstep == 1 || kstep == -1) && (bstep == 1 || bstep == -1);
 }
 
+void usbview_redraw_request(void) {}          /* the serial console's key 77: not in the TinyUSB build */
 void usbview_on(void) { on = 1; learn(); }       /* main.c switches the port on (usbser_start) */
 void usbview_off(void) { on = 0; }
 int usbview_is_on(void) { return on; }

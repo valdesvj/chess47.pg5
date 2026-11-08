@@ -168,21 +168,31 @@ network take about a second a move. For a bot without the calculator (the same e
 `build/chess47-uci` with [lichess-bot](https://github.com/lichess-bot-devs/lichess-bot).
 
 
-## The screen in your terminal
+## The USB: DMCP5 3.58's serial console (default) or TinyUSB
 
-With USB on, every new screen also goes to the PC (`CHESS47 LCD 400 240`, 240 lines of hex, `END`; the moves still
-come as plain text lines between them). `tools/dm42view.py` (the same viewer as NAV47) shows it:
+**`make` (USB=sercon): DMCP5 3.58's own serial console, no TinyUSB.** Needs DMCP5 3.58 on the DM42n (SwissMicros'
+preliminary "DMCP5 Serial Console API", IFC 3.18: the .pg5 is built with IFC 18, and an older DMCP5 refuses to load
+it). USB on turns on DMCP's console and its LCD stream, and gives your DMCP settings back when it goes off.
+* The moves and the other lines (`newgame`, `opponent`, `result` ...) go on **channel 2**, whole lines, at most
+  128 bytes a write (the data sheet: longer or quick writes can lose their ends); the PC's lines come on channel 2
+  too. The PC tools add the byte `0x12` before each line and keep only channel 2 (`tools/dm42port.py`).
+* The screen: **DMCP sends it itself** (the changed LCD rows on channel 0); when the PC asks for the whole screen
+  (`L`), DMCP gives Chess 47 the key code 77 and it redraws.
+* The calculator sleeps as usual; while USB is on, a 100 ms timer wakes it to read the PC's lines.
+* `src/sercon.c` (the same interface as the TinyUSB code, so the game does not change), `src/sercon_ifc.h` (the
+  three calls, from the data sheet: replace with the official 3.58 headers when you have them).
+
+**`make USB=tinyusb`: our own serial port, any DMCP5.** The firmware's own `usb_acm_on()` leaves the USB port
+disconnected (the DM42n's USB core stays in soft-disconnect), so Chess 47 drives the USB itself with **TinyUSB**
+(`src/usb/`, `third_party/tinyusb`, MIT): one CDC serial port, text lines, and every screen as a frame
+(`CHESS47 LCD 400 240`, 240 lines of hex, `END`). While USB is on the calculator does not sleep.
+
+`tools/usb_stockfish.py`, `tools/lichess_board.py` and `tools/dm42view.py` work with both builds:
 
 ```bash
-python3 tools/dm42view.py                 # Braille dots in the terminal
+python3 tools/dm42view.py                 # the screen: Braille dots in the terminal
 python3 tools/dm42view.py --png shots/    # and a PNG of every screen
 ```
-
-The firmware's own `usb_acm_on()` leaves the USB port disconnected (the DM42n's USB core stays in soft-disconnect),
-so Chess 47 drives the USB itself with **TinyUSB** (`src/usb/`, `third_party/tinyusb`, MIT): one CDC serial port,
-`/dev/ttyACM0`, which can also **receive** (for a two-way Stockfish link later). While USB is on the calculator does
-not sleep (it would stop the USB). Chess 47 learns how the firmware stores the LCD lines (it sets a pixel and looks
-which bit changes).
 
 ## In the browser (web/chess47.html)
 
@@ -220,9 +230,11 @@ then packs the `.pg5`: program size word plus SHA1 trailer.
 
 ```bash
 # simulator: real main.c + engine.c against a fake DMCP layer, renders the LCD
-gcc -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' \
-    -Itest/sim -Isrc -Isrc/usb -o build/sim test/sim/sim.c src/main.c src/engine.c src/usbview.c test/sim/usbser_sim.c
+make sim                    # USB = DMCP's serial console (test/sim/sercon_sim.c); make sim USB=tinyusb: TinyUSB
 cd build && ./sim 5 8 8 5 WAIT:2000 SNAP:shot && python3 ../test/sim/render.py shot shot.png
+# the USB: ./acm.out (what the calculator sends), ./acm.in (the PC's lines; ACM_FREE=1: whenever asked);
+# HOSTL in the key script = the PC sends L (the whole screen)
+python3 tools/dm42view.py acm.out --once --png .
 
 # UCI engine (for cutechess, Arena, or the Elo test)
 gcc -O2 -o build/chess47-uci test/uci.c src/engine.c

@@ -39,6 +39,9 @@ import termios
 import threading
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dm42port  # noqa: E402
+
 import chess
 import requests
 
@@ -46,33 +49,11 @@ API = "https://lichess.org"
 
 
 # ---------------------------------------------------------------- the calculator
-def open_port(path):
-    fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
-    t = termios.tcgetattr(fd)
-    t[0] = 0; t[1] = 0; t[3] = 0                     # raw: no echo back, no line editing
-    t[2] |= termios.CLOCAL | termios.CREAD
-    termios.tcsetattr(fd, termios.TCSANOW, t)
-    return fd
-
-
-def calc_lines(fd, out):
-    """the calculator's lines (screen frames skipped) into the queue out"""
-    buf, frame = b"", False
-    while True:
-        chunk = os.read(fd, 4096)
-        if not chunk:
-            out.put(("calc-gone", None))
-            return
-        buf += chunk
-        while b"\n" in buf:
-            raw, buf = buf.split(b"\n", 1)
-            line = raw.strip().decode("ascii", "replace")
-            if line.endswith("LCD 400 240"):
-                frame = True
-            elif frame:
-                frame = line != "END"
-            elif line:
-                out.put(("calc", line))
+def calc_lines(port, out):
+    """the calculator's lines (the screen and DMCP's own lines skipped: tools/dm42port.py) into the queue out"""
+    for line in port.lines():
+        out.put(("calc", line))
+    out.put(("calc-gone", None))
 
 
 # ---------------------------------------------------------------- Lichess
@@ -156,19 +137,19 @@ def main():
     token = os.environ.get("LICHESS_TOKEN") or (open(a.token).read().strip() if os.path.exists(a.token) else "")
     if not token:
         sys.exit("no Lichess token: see the setup at the top of this file")
-    port = a.port or (sorted(glob.glob("/dev/serial/by-id/*SwissMicros_DM42n*")) or ["/dev/ttyACM0"])[0]
+    port = a.port or dm42port.find()
     li = Lichess(token)
     acct = li.get("/api/account")
     me = acct["id"]
     if a.bot and acct.get("title") != "BOT":
         sys.exit(f"{me} is not a BOT account: see --bot at the top of this file")
     print(f"Lichess: {me}{' (BOT, level %d)' % a.level if a.bot else ''}   calculator: {port}")
-    fd = open_port(port)
+    calc = dm42port.Port(port)          # DMCP's serial console (channel 2) or the TinyUSB port
     q = queue.Queue()
-    threading.Thread(target=calc_lines, args=(fd, q), daemon=True).start()
+    threading.Thread(target=calc_lines, args=(calc, q), daemon=True).start()
 
     def send(s):
-        os.write(fd, (s + "\r\n").encode())
+        calc.send(s)
 
     li.stream("/api/stream/event", q, "event")
     clk = {"clock.limit": a.clock * 60, "clock.increment": a.inc, "color": a.color}

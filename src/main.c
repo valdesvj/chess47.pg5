@@ -108,6 +108,11 @@ static uint32_t rng = 0x47474747u;
 /* CPU vs USB: the PC holds the engine until "go" (while it catches the board up) and gives the game's clock */
 static int      usb_hold;
 static char     end_txt[40];               /* "end <text>": how the game ended on the PC's side */
+/* vs USB (Lichess, Stockfish): resign / abort, draw offers, claiming the win (F4 / F5 on menu page 1) */
+static int8_t   draw_in;                   /* the opponent offers a draw (the PC: "drawoffer") */
+static int8_t   draw_out;                  /* we offered one: until the opponent moves or declines */
+static int8_t   claim_ok;                  /* the opponent left: the win can be claimed (the PC: "claim on") */
+static char     confirm;                   /* a second press needed: 'R' resign / abort, 'A' accept the draw */
 static int32_t  usb_left = -1, usb_inc;    /* the engine's time left and increment, ms (-1: no clock) */
 
 /* ------------------------------------------------------------------ */
@@ -428,6 +433,10 @@ static void draw_menu(void) {
   for (int i = 0; i < 6; i++) keys[i] = MENU[cfg.page][i];
 
   if (cfg.page == 1 && chess960) keys[0] = "960*";
+  if (cfg.page == 0 && VS_USB) {                       /* undo and hints are off vs USB: the game's own actions */
+    keys[3] = G->n < 2 ? "ABORT" : "RESIGN";
+    keys[4] = claim_ok ? "CLAIM" : draw_in ? "ACCEPT" : draw_out ? "DRAW*" : "DRAW";
+  }
 
   lcd_draw_menu_keys(keys);
 }
@@ -457,6 +466,42 @@ static void usb_opponent(void) {
   usb_send(cfg.human ? "opponent white\r\n" : "opponent black\r\n");
 }
 
+/* vs USB: F4 resigns (ABORT before each side has moved, as on Lichess); a second press confirms */
+static void usb_resign(void) {
+  if (G->over) { strcpy(status, "Game over"); return; }
+  int ab = G->n < 2;
+  if (confirm != 'R') { confirm = 'R'; strcpy(status, ab ? "Abort? ABORT again" : "Resign? RESIGN again"); return; }
+  confirm = 0;
+  usb_send(ab ? "abort\r\n" : "resign\r\n");
+  strcpy(status, ab ? "Abort sent" : "Resignation sent");
+}
+
+/* vs USB: F5 offers a draw; ACCEPT (twice) when the opponent offers; CLAIM when the opponent left */
+static void usb_draw(void) {
+  if (G->over) { strcpy(status, "Game over"); return; }
+  if (claim_ok) { usb_send("claim\r\n"); strcpy(status, "Win claimed"); return; }
+  if (draw_in) {
+    if (confirm != 'A') { confirm = 'A'; strcpy(status, "Draw? ACCEPT again"); return; }
+    confirm = 0;
+    usb_send("draw accept\r\n");
+    strcpy(status, "Draw accepted");
+    return;
+  }
+  if (draw_out) { strcpy(status, "Offer sent: waiting"); return; }
+  usb_send("draw offer\r\n");
+  draw_out = 1;
+  strcpy(status, "Draw offered");
+}
+
+/* vs USB: BSP declines the opponent's offer (a move declines it too) */
+static int usb_decline(void) {
+  if (!draw_in || G->over) return 0;
+  draw_in = 0;
+  usb_send("draw decline\r\n");
+  strcpy(status, "Draw declined");
+  return 1;
+}
+
 static void clock_reset(void) {
   clk[0] = clk[1] = (int32_t)TCS[cfg.tc].base_s * 1000;
   clk_live = 0;
@@ -474,6 +519,8 @@ static void new_game_from(const Pos *start, int pos960) {
   G->n = 0;
   G->over = 0;
   G->pos960 = pos960;
+  draw_in = draw_out = claim_ok = 0;
+  confirm = 0;
   kirk = 0;
   sel = hint_from = hint_to = last_from = last_to = NOSQ;
   cur = cfg.flip ? 0x64 : 0x14;
@@ -524,6 +571,10 @@ static void do_move(Move m) {
   }
   turn_start = now_ms();
   move_to_san(p, m, G->san[G->n]);
+  if (VS_USB) {                                   /* a move ends the other side's draw offer (Lichess) */
+    if (usb_side(mover)) draw_out = 0;            /* the opponent moved: our offer lapsed */
+    else draw_in = 0;                             /* we moved: their offer declined */
+  }
   if (cfg.usb) {
     char s[16];
     move_to_str(p, m, s);
@@ -1129,8 +1180,8 @@ static void handle_softkey(int k) {
   case 1:  cfg.level = (int8_t)((cfg.level + 1) % 10);                              /* LEVEL */
            sprintf(status, "Level %s", LEVELS[cfg.level].name); break;
   case 2:  cfg.flip ^= 1; break;                                                     /* FLIP */
-  case 3:  undo(); break;                                                            /* UNDO */
-  case 4:  hint(); break;                                                            /* HINT */
+  case 3:  if (VS_USB) usb_resign(); else undo(); break;                            /* UNDO (vs USB: RESIGN) */
+  case 4:  if (VS_USB) usb_draw(); else hint(); break;                               /* HINT (vs USB: DRAW) */
   case 6: if (chess960) { new_game(-1); strcpy(status, "Normal chess");} 
           else {  start_960_entry(); } break; /* 960 / normal-chess toggle */                                               /* 960 */
   case 7:  cfg.tc = (int8_t)((cfg.tc + 1) % TC_CNT); clock_reset(); clock_update_live(); /* CLOCK */
@@ -1166,6 +1217,8 @@ static void handle_softkey(int k) {
 
 static void handle_key(int key) {
   if (key == KEY_SHIFT) { shift = !shift; return; }
+  if (!(cfg.page == 0 && ((key == KEY_F4 && confirm == 'R') || (key == KEY_F5 && confirm == 'A'))))
+    confirm = 0;                                   /* any other key: no resign / accept pending */
 
   if (num_mode) {
     if (key >= KEY_F1 && key <= KEY_F6) { num_mode = 0; }
@@ -1193,6 +1246,7 @@ static void handle_key(int key) {
       wait_for_key_release(-1);
       return;
     case KEY_BSP: /* resign */
+      if (VS_USB) { confirm = 'R'; usb_resign(); return; }   /* vs USB: the PC must know (one press: SHIFT is the care) */
       if (!G->over && G->n) { G->over = 7; clk_live = 0; }
       return;
     case KEY_SIGMA: show_info(); return;
@@ -1215,7 +1269,7 @@ static void handle_key(int key) {
   case KEY_3: move_cursor(1, -1); break;
   case KEY_5: case KEY_ENTER: select_square(); break;
   case KEY_EXIT: sel = NOSQ; hint_from = hint_to = NOSQ; break;
-  case KEY_BSP: undo(); break;
+  case KEY_BSP: if (!(VS_USB && usb_decline())) undo(); break;
   default: break;
   }
 }
@@ -1266,6 +1320,17 @@ static char rxl[128];                     /* "newgame white <FEN>": a FEN is up 
 static int rxn;
 static int usb_line(const char *l) {
   if (!strncmp(l, "msg ", 4)) { snprintf(status, sizeof status, "%.36s", l + 4); return 1; }
+  if (!strcmp(l, "drawoffer off")) { draw_in = 0; if (confirm == 'A') confirm = 0; return 1; }
+  if (!strcmp(l, "drawoffer")) {                       /* the opponent offers a draw */
+    if (G->over) return 0;
+    draw_in = 1;
+    strcpy(status, "Draw offered: ACCEPT?");
+    beep(880, 60);
+    return 1;
+  }
+  if (!strcmp(l, "drawdeclined")) { if (draw_out) { draw_out = 0; strcpy(status, "Draw declined"); } return 1; }
+  if (!strcmp(l, "claim on")) { claim_ok = 1; strcpy(status, "Opp. left: CLAIM win"); beep(880, 60); return 1; }
+  if (!strcmp(l, "claim off")) { claim_ok = 0; return 1; }
   int bot = !strncmp(l, "botgame ", 8);
   if (bot || !strncmp(l, "newgame ", 8)) {            /* the PC starts a game: "newgame white|black [FEN]" (your side), */
     Pos p;                                             /* "botgame white|black [FEN]" (the engine's side, held until go) */

@@ -20,6 +20,13 @@ On the DM42n: Chess 47 (any mode); the script switches it to "You vs USB" and se
 
 Board API games must be rapid, classical or correspondence (15+10 is rapid).
 
+During the game, on the calculator's menu page 1 (Lichess's own rules):
+  F4  RESIGN (press twice); ABORT (twice) before each side has moved, as Lichess allows
+  F5  DRAW offers a draw (DRAW* while it waits; a move by the opponent declines it); when the opponent offers,
+      ACCEPT (twice) agrees, BSP declines, and your next move declines it too; CLAIM when the opponent has left
+      and Lichess lets you claim the win
+  SHIFT BSP resigns at once
+
 As a BOT (--bot): the calculator's own engine plays ("CPU vs USB"), on a Lichess BOT account (a new account that has
 never played, upgraded once: curl -d '' https://lichess.org/api/bot/account/upgrade -H "Authorization: Bearer TOKEN";
 its token needs the scope bot:play). Keep that token apart: --token ~/.config/chess47/bot.token
@@ -173,6 +180,22 @@ def main():
     board = chess.Board()
     sent = set()                      # my moves sent to Lichess, not yet confirmed
     inc = 0                           # the game's increment, ms
+    offers = {"mine": False, "theirs": False}     # draw offers pending (gameState wdraw / bdraw)
+    ACTIONS = {"resign": "resign", "abort": "abort", "draw offer": "draw/yes", "draw accept": "draw/yes",
+               "draw decline": "draw/no", "claim": "claim-victory"}
+
+    def draws(st):
+        """the draw offers in a game state: the calculator told when the opponent's offer comes or goes, and when
+        ours is declined (it disappears while the game goes on)"""
+        mine = bool(st.get("wdraw" if me_white else "bdraw"))
+        theirs = bool(st.get("bdraw" if me_white else "wdraw"))
+        if theirs != offers["theirs"]:
+            send("drawoffer" if theirs else "drawoffer off")
+            print("Draw offered by the opponent" if theirs else "The opponent's draw offer is gone")
+        if offers["mine"] and not mine and st.get("status") in ("created", "started"):
+            send("drawdeclined")
+            print("Our draw offer was declined")
+        offers["mine"], offers["theirs"] = mine, theirs
     ENDS = {"mate": "Checkmate", "resign": "Resignation", "timeout": "Left the game", "outoftime": "Time out",
             "draw": "Draw", "stalemate": "Stalemate", "aborted": "Aborted", "noStart": "No start"}
 
@@ -204,6 +227,14 @@ def main():
                 print("calculator:", v)
                 continue
             if game is None:
+                continue
+            if v in ACTIONS:                                # resign, abort, draw offer / accept / decline, claim
+                r = li.post(f"{api}/game/{game}/{ACTIONS[v]}")
+                print("me:", v, "" if r.ok else "(Lichess refused: %s)" % r.text.strip()[:80])
+                if v == "draw offer":
+                    offers["mine"] = r.ok
+                if not r.ok:
+                    send(f"msg Lichess refused: {v}")
                 continue
             mv = calc_to_board(board, v)
             if mv is None:
@@ -262,8 +293,26 @@ def main():
                 li.post(f"/api/bot/game/{game}/chat", {"room": "player", "text":
                         f"Chess 47 (level {a.level}) thinking on a SwissMicros DM42n calculator. Good luck!"})
             sync(moves, st["status"], st.get("wtime"), st.get("btime"), st.get("winner"))
+            offers.update(mine=False, theirs=False)
+            draws(st)
         elif tag == "game" and v.get("type") == "gameState":
             sync(v["moves"].split() if v["moves"] else [], v["status"], v.get("wtime"), v.get("btime"), v.get("winner"))
+            draws(v)
+        elif tag == "game" and v.get("type") == "opponentGone":
+            if not v.get("gone"):
+                send("claim off")
+                send("msg The opponent is back")
+                print("The opponent is back")
+            else:
+                secs = v.get("claimWinInSeconds")
+                if secs:
+                    send(f"msg Opponent left: claim in {secs} s")
+                    threading.Timer(secs, q.put, args=(("claim-ready", game),)).start()
+                else:
+                    send("claim on")
+                print("The opponent left the game", f"(claim in {secs} s)" if secs else "(claim now)")
+        elif tag == "claim-ready" and v == game:
+            send("claim on")
         elif tag == "game-end":
             print("The game is over. Ctrl+C to quit, or start another game on lichess.org")
             game = None

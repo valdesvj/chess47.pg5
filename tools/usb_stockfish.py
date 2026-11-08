@@ -10,6 +10,8 @@ The calculator sends:   CHESS47 hello / newgame <FEN> / opponent white|black / e
 Over DMCP5 3.58's serial console (the default build) the lines are on channel 2: tools/dm42port.py does that.
 This script sends:      Stockfish's move (e7e5) when it is the USB side's turn; the calculator plays it and sends
                         it back, which confirms it. "msg <text>" shows a text on the calculator.
+On the calculator (menu page 1): F4 RESIGN / ABORT (twice): the game ends; F5 DRAW: Stockfish agrees only when its
+evaluation is not better than equal, else declines.
 --manual: the old one-way way: Stockfish's move is printed and you type it on the calculator ("2 players" mode).
 """
 import argparse
@@ -90,6 +92,26 @@ def main():
                 continue
             if line.startswith(("result", "illegal", "notyourturn", "over")):
                 print(line)
+                continue
+            if line in ("resign", "abort"):                  # the calculator's F4 (RESIGN / ABORT)
+                if line == "abort":
+                    send("end Aborted")
+                else:
+                    send("end Resignation " + ("1-0" if sf_white else "0-1"))
+                print("DM42n:", line)
+                continue
+            if line == "draw offer":                         # F5: Stockfish agrees only if it is not better
+                info = eng.analyse(board, chess.engine.Limit(time=min(a.time, 1.0)))
+                cp = info["score"].pov(chess.WHITE if sf_white else chess.BLACK).score(mate_score=100000)
+                if cp <= 0 and not board.is_game_over():
+                    send("end Draw agreed 1/2")
+                    print(f"DM42n offers a draw: Stockfish agrees ({cp / 100:+.2f})")
+                else:
+                    send("drawdeclined")
+                    send("msg Stockfish declines the draw")
+                    print(f"DM42n offers a draw: Stockfish declines ({cp / 100:+.2f})")
+                continue
+            if line.startswith(("draw ", "claim")):          # accept / decline (Stockfish never offers), claim
                 continue
             try:
                 mv = chess.Move.from_uci(line)

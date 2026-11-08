@@ -134,6 +134,21 @@ go to Lichess as yours, and your opponent's come back to the board. The PC also 
 `msg` lines (the opponent and the clocks). Hints are off in "You vs USB": in games as yourself only you choose the
 moves (Lichess fair play; engines play only on BOT accounts).
 
+During a game vs USB, menu page 1 has the game's own actions in place of UNDO and HINT (Lichess's rules):
+
+| Key | Action |
+|---|---|
+| **F4 RESIGN** | resign (press twice); **ABORT** (twice) before each side has moved |
+| **F5 DRAW** | offer a draw (**DRAW\*** while it waits; the opponent's move declines it) |
+| **F5 ACCEPT** | the opponent offers a draw (a beep): press twice to agree; **BSP** declines, and so does your next move |
+| **F5 CLAIM** | the opponent left the game and Lichess lets you claim the win |
+| **SHIFT BSP** | resign at once |
+
+Against `usb_stockfish.py` the same keys work: RESIGN and ABORT end the game, and Stockfish agrees to a draw
+only when its evaluation is not better than equal. The lines: the calculator sends `resign`, `abort`,
+`draw offer|accept|decline`, `claim`; the PC sends `drawoffer`, `drawoffer off`, `drawdeclined`, `claim on|off`
+(`test/test_usb_actions.py` checks them in the simulator).
+
 ```bash
 mkdir -p ~/.config/chess47      # a token with the scope "Play games with the board API" (board:play):
 echo 'lip_...' > ~/.config/chess47/lichess.token && chmod 600 ~/.config/chess47/lichess.token

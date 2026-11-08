@@ -13,10 +13,20 @@ whichever USB the .pg5 was built with.
   for line in port.lines():    # Chess 47's lines, without '\\r\\n'; the screen and DMCP's own lines skipped
       ...
   find()                       # the DM42n in /dev/serial/by-id, else /dev/ttyACM0
+
+The screen at the same time (one program has the port: the bridge itself shows it):
+  screen = Screen(png='/tmp/dm42.png', view=True)   # a PNG rewritten on each change (feh -R 0.5 it), and / or
+  port = Port(path, screen)                         # the screen in Braille in this terminal, the log under it
+  screen.log('text')                                # a log line (with view: under the screen, else printed)
 """
+import collections
 import glob
 import os
+import shutil
+import sys
 import termios
+import threading
+import time
 
 CH = 2                                   # Chess 47's channel on the serial console
 
@@ -26,9 +36,76 @@ def find():
     return found[0] if found else '/dev/ttyACM0'
 
 
+class Screen:
+    """the DM42n's screen from the same stream: DMCP's LCD rows (channel 0) or TinyUSB's frames"""
+
+    def __init__(self, png=None, view=False, scale=3, every=0.3):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import dm42view
+        self.V = dm42view
+        self.dm = dm42view.Dmcp()
+        self.png, self.view, self.scale, self.every = png, view, scale, every
+        self.logs = collections.deque(maxlen=12)
+        self.dirty = False
+        self.lock = threading.Lock()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def row(self, raw):                      # a line of channel 0: an LCD row (or V, key reports: ignored)
+        self.dm.ch = 0
+        if self.dm.line(raw):
+            self.dirty = True
+
+    def frame(self, px):                     # a whole TinyUSB frame
+        self.dm.px = px
+        self.dirty = True
+
+    def log(self, text):
+        if self.view:
+            with self.lock:
+                self.logs.append(time.strftime('%H:%M:%S ') + text)
+            self.dirty = True
+        else:
+            print(text, flush=True)
+
+    def _run(self):
+        while True:
+            time.sleep(self.every)
+            if not self.dirty:
+                continue
+            self.dirty = False
+            px = [r[:] for r in self.dm.px]
+            if self.png:
+                try:
+                    from PIL import Image
+                    img = Image.new('RGB', (400, 240), (223, 230, 214))
+                    p = img.load()
+                    for y in range(240):
+                        for x in range(400):
+                            if px[y][x]:
+                                p[x, y] = (30, 34, 32)
+                    img = img.resize((400 * self.scale, 240 * self.scale), Image.NEAREST)
+                    tmp = self.png + '.tmp.png'
+                    img.save(tmp)
+                    os.replace(tmp, self.png)
+                except ImportError:
+                    self.png = None
+                    self.log('--screen needs Pillow (pip install pillow)')
+            if self.view:
+                cols, lines = shutil.get_terminal_size((200, 62))
+                with self.lock:
+                    logs = list(self.logs)
+                room = max(4, lines - len(logs) - 2)
+                sc = max(1, min((cols * 2) // 400, (room * 4) // 240))
+                art = self.V.braille(px, 0, 0, 400, 240, sc) if sc > 1 or room * 4 >= 240 else \
+                    self.V.braille(px, 0, 0, 400, 240, 1)[:room]
+                sys.stdout.write('\x1b[H\x1b[2J' + '\n'.join(art) + '\n' + '\n'.join(logs) + '\n')
+                sys.stdout.flush()
+
+
 class Port:
-    def __init__(self, path):
+    def __init__(self, path, screen=None):
         self.path = path
+        self.screen = screen
         if os.path.exists(path) and not path.startswith('/dev/'):     # a recorded stream (the simulator's acm.out)
             self.fd = os.open(path, os.O_RDONLY)
             self.tty = False
@@ -47,10 +124,18 @@ class Port:
         if self.tty:
             os.write(self.fd, bytes([0x10 + CH]) + line.encode('ascii') + b'\n')
 
+    def ask_screen(self):
+        """the whole screen from DMCP (L on channel 0): asked once when a Screen is attached"""
+        if self.tty:
+            os.write(self.fd, b'\x10L\n')
+
     def lines(self):
         """Chess 47's lines; ends when the port closes (the cable out) or the file ends"""
         buf = bytearray()
         frame = False
+        rows = []
+        if self.screen:
+            self.ask_screen()
         while True:
             chunk = os.read(self.fd, 4096)
             if not chunk:
@@ -66,11 +151,18 @@ class Port:
                 raw = bytes(buf)
                 buf.clear()
                 if self.console and self.ch != CH:       # DMCP's own lines (the LCD rows, V, key reports)
+                    if self.screen and self.ch == 0:
+                        self.screen.row(raw)
                     continue
                 line = bytes(c for c in raw if c < 0x80).strip().decode('ascii', 'replace')
                 if line.endswith('LCD 400 240'):         # TinyUSB: a screen frame, to its END
-                    frame = True
+                    frame, rows = True, []
                 elif frame:
                     frame = line != 'END'
+                    if frame and len(line) == 100:
+                        v = int(line, 16)
+                        rows.append([(v >> (399 - x)) & 1 for x in range(400)])
+                    elif not frame and self.screen and len(rows) == 240:
+                        self.screen.frame(rows)
                 elif line:
                     yield line

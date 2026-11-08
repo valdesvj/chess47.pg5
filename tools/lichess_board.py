@@ -17,6 +17,9 @@ On the DM42n: Chess 47 (any mode); the script switches it to "You vs USB" and se
   python3 tools/lichess_board.py --challenge NAME    # challenge a friend
   python3 tools/lichess_board.py                     # wait: play a game you start on the website (or one going on)
   options: --clock 15 --inc 10 --rated --color white|black|random --port /dev/ttyACM1
+  the screen while you play (one program has the port: this one shows it):
+    --view               the calculator's screen in this terminal (Braille), the moves and messages under it
+    --screen /tmp/dm42.png   a PNG on every change; in another terminal: feh -R 0.5 /tmp/dm42.png
 
 Board API games must be rapid, classical or correspondence (15+10 is rapid).
 
@@ -122,6 +125,8 @@ def calc_to_board(board, text):
 def main():
     ap = argparse.ArgumentParser(description="Chess 47 on the DM42n as a Lichess board")
     ap.add_argument("--port", default=None)
+    ap.add_argument("--view", action="store_true", help="the calculator's screen in this terminal (Braille), the log under it")
+    ap.add_argument("--screen", metavar="PNG", help="the calculator's screen to this PNG on every change (feh -R 0.5 PNG)")
     ap.add_argument("--token", default=os.path.expanduser("~/.config/chess47/lichess.token"))
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--ai", type=int, metavar="LEVEL", help="against Lichess's computer, level 1-8")
@@ -151,7 +156,10 @@ def main():
     if a.bot and acct.get("title") != "BOT":
         sys.exit(f"{me} is not a BOT account: see --bot at the top of this file")
     print(f"Lichess: {me}{' (BOT, level %d)' % a.level if a.bot else ''}   calculator: {port}")
-    calc = dm42port.Port(port)          # DMCP's serial console (channel 2) or the TinyUSB port
+    screen = dm42port.Screen(a.screen, a.view) if (a.view or a.screen) else None
+    if a.view:                          # the log goes under the screen
+        globals()["print"] = lambda *x, **k: screen.log(" ".join(str(v) for v in x))
+    calc = dm42port.Port(port, screen)  # DMCP's serial console (channel 2) or the TinyUSB port; the screen too
     q = queue.Queue()
     threading.Thread(target=calc_lines, args=(calc, q), daemon=True).start()
 

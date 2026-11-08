@@ -134,6 +134,13 @@ go to Lichess as yours, and your opponent's come back to the board. The PC also 
 `msg` lines (the opponent and the clocks). Hints are off in "You vs USB": in games as yourself only you choose the
 moves (Lichess fair play; engines play only on BOT accounts).
 
+The screen while you play: only one program can have the port, so the bridge shows it itself (both bridges):
+
+```bash
+python3 tools/lichess_board.py --ai 3 --view                  # the screen in this terminal, the moves under it
+python3 tools/lichess_board.py --ai 3 --screen /tmp/dm42.png  # a PNG on every change; elsewhere: feh -R 0.5 /tmp/dm42.png
+```
+
 During a game vs USB, menu page 1 has the game's own actions in place of UNDO and HINT (Lichess's rules):
 
 | Key | Action |

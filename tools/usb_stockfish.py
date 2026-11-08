@@ -37,6 +37,8 @@ def main():
     ap.add_argument("--side", choices=["white", "black"], default="black",
                     help="Stockfish's colour until the calculator says (opponent white|black)")
     ap.add_argument("--manual", action="store_true", help="print Stockfish's move, you type it (one-way)")
+    ap.add_argument("--view", action="store_true", help="the calculator's screen in this terminal (Braille), the log under it")
+    ap.add_argument("--screen", metavar="PNG", help="the calculator's screen to this PNG on every change (feh -R 0.5 PNG)")
     a = ap.parse_args()
     if not a.port:
         a.port = dm42port.find()
@@ -46,7 +48,10 @@ def main():
         eng.configure({"UCI_LimitStrength": True, "UCI_Elo": a.elo})
     sf_white = a.side == "white"
     board = chess.Board()
-    port = dm42port.Port(a.port)              # DMCP's serial console (channel 2) or the TinyUSB port
+    screen = dm42port.Screen(a.screen, a.view) if (a.view or a.screen) else None
+    if a.view:                                # the log goes under the screen
+        globals()["print"] = lambda *x, **k: screen.log(" ".join(str(v) for v in x))
+    port = dm42port.Port(a.port, screen)      # DMCP's serial console (channel 2) or the TinyUSB port; the screen too
 
     def send(s):
         port.send(s)

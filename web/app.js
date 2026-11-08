@@ -31,8 +31,8 @@ const TCS = [
 const DM42N_NPS = 19;                                     /* nodes per ms of the DM42n on USB power (README) */
 const MENU = [
   ['NEW', 'LEVEL', 'FLIP', 'UNDO', 'HINT', '>>'],
-  ['960', 'CLOCK', 'SIDE', 'SAVE', 'LOAD', '>>'],
-  ['PGN', 'MODE', 'FEN', 'SOUND', 'INFO', '>>'],
+  ['960', 'CLOCK', 'SIDE', 'RESIGN', 'DRAW', '>>'],
+  ['PGN', 'MODE', 'FEN', 'SAVE', 'LOAD', '>>'],
 ];
 const PROMO_MENU = ['Queen', 'Rook', 'Bishop', 'Knight', '', 'Cancel'];
 const BOOK = [
@@ -67,6 +67,7 @@ const cfg = Object.assign({ level: 4, mode: MODE_HC, human: WHITE, flip: 0, tc: 
 const G = { hist: [E.newPos()], moves: [], san: [], keys: [], n: 0, over: 0, pos960: -1, legal: [], start: null, rfile: [7, 0], c960: 0 };
 let cur = 0x14, sel = NOSQ, hint_from = NOSQ, hint_to = NOSQ, last_from = NOSQ, last_to = NOSQ;
 let status = '', promo_mode = 0, promo_opts = [0, 0, 0, 0], thinking = 0, kirk = 0, info_screen = 0;
+let resigner = -1, offer = -1, confirm = '', cpu_score = 0, cpu_scored = 0;   /* RESIGN, DRAW, the CPU's view */
 let clk = [0, 0], turn_start = 0, clk_live = 0;
 let last = { depth: 0, nodes: 0, ms: 0, score: 0 };
 const CUR = () => G.hist[G.n];
@@ -114,7 +115,7 @@ function new_game_from(start, pos960) {
   G.rfile = [E.c_rfile[0], E.c_rfile[1]]; G.c960 = E.chess960;
   G.start = E.pos_to_fen(start);
   G.moves = []; G.san = []; G.keys = [[start.hi, start.lo]]; G.n = 0; G.over = 0; G.pos960 = pos960;
-  kirk = 0;
+  kirk = 0; resigner = offer = -1; confirm = ''; cpu_scored = 0;
   sel = hint_from = hint_to = last_from = last_to = NOSQ;
   cur = cfg.flip ? 0x64 : 0x14;
   status = ''; promo_mode = 0;
@@ -131,13 +132,15 @@ function new_game(pos960) {
 
 const result_text = (code, loser) => {
   if (kirk && code === 1) return loser === WHITE ? 'Kirk wins  0-1' : 'Kirk wins  1-0';
+  if (code === 7 && resigner >= 0) loser = resigner;
+  if (code === 9) return 'Draw agreed 1/2';
   return ['', loser === WHITE ? 'Checkmate  0-1' : 'Checkmate  1-0', 'Stalemate  1/2', '50 moves  1/2', 'No material 1/2',
           'Repetition 1/2', loser === WHITE ? 'W flag fell 0-1' : 'B flag fell 1-0', loser === WHITE ? 'W resigns 0-1' : 'B resigns 1-0'][code] || '';
 };
 const result_tag = () => {
-  const loser = CUR().side;
+  const loser = G.over === 7 && resigner >= 0 ? resigner : CUR().side;
   if ([1, 6, 7].includes(G.over)) return loser === WHITE ? '0-1' : '1-0';
-  if ([2, 3, 4, 5].includes(G.over)) return '1/2-1/2';
+  if ([2, 3, 4, 5, 9].includes(G.over)) return '1/2-1/2';
   return '*';
 };
 
@@ -157,6 +160,7 @@ function do_move(m) {
     clk[mover] += TCS[cfg.tc].inc * 1000;
   }
   turn_start = now();
+  if (offer >= 0 && mover !== offer) offer = -1;            /* 2 players: moving declines the other side's offer */
   G.san[G.n] = E.move_to_san(p, m);
   const q = E.newPos();
   E.make_move(p, q, m);
@@ -237,6 +241,11 @@ function run_search(depth, ms, noise, oninfo) {
                   max_nodes: cfg.calc && ms ? max_nodes : 0 });
   });
 }
+function move_now_discard() {                             /* stop thinking, no move (resign, new game) */
+  if (!wjob) return;
+  const j = wjob; wjob = null; thinking = 0; worker.terminate(); worker = null;
+  j.resolve({ best: 0, discard: 1 });
+}
 function move_now() {                                     /* EXIT while thinking: the best move so far */
   if (!wjob) return;
   const j = wjob; wjob = null;
@@ -290,9 +299,10 @@ async function cpu_move() {
       redraw();
     });
     thinking = 0;
-    if (G.n !== n0) return;                               /* the game changed meanwhile (new game) */
+    if (r.discard || G.n !== n0 || G.over) return;        /* stopped (resign, draw, new game) */
     last = { depth: r.depth, nodes: r.nodes, ms: r.ms, score: r.score };
     m = r.best || G.legal[0];
+    cpu_score = r.score; cpu_scored = 1;
   }
   do_move(m);
   if (cfg.level === 0 && !G.over) status = 'CRAZY played ' + G.san[G.n - 1];
@@ -304,7 +314,7 @@ async function hint() {
   const n0 = G.n;
   const r = await run_search(40, 1500, 0);
   thinking = 0;
-  if (G.n !== n0 || !r.best) return;
+  if (r.discard || G.n !== n0 || !r.best) return;
   geometry();
   hint_from = MFROM(r.best);
   hint_to = MFLAGS(r.best) & F_CASTLE ? E.castle_rook_sq(CUR(), r.best) : MTO(r.best);
@@ -369,8 +379,8 @@ function copy(text) { try { navigator.clipboard.writeText(text); return 1; } cat
 
 function serialize() {
   geometry();
-  return { start: G.start, rfile: G.rfile, c960: G.c960, pos960: G.pos960, kirk,
-           moves: G.moves.slice(0, G.n).map((m, i) => E.move_to_str(G.hist[i], m)), over: G.over === 7 ? 7 : 0, clk };
+  return { start: G.start, rfile: G.rfile, c960: G.c960, pos960: G.pos960, kirk, resigner,
+           moves: G.moves.slice(0, G.n).map((m, i) => E.move_to_str(G.hist[i], m)), over: G.over === 7 || G.over === 9 ? G.over : 0, clk };
 }
 function deserialize(s) {
   if (!s || !s.start) return 0;
@@ -381,7 +391,7 @@ function deserialize(s) {
   new_game_from(p, s.pos960);
   kirk = s.kirk || 0;
   for (const u of s.moves) { const m = E.str_to_move(CUR(), u); if (!m) break; do_move(m); }
-  if (s.over === 7) { G.over = 7; clk_live = 0; }
+  if (s.over === 7 || s.over === 9) { G.over = s.over; resigner = s.resigner ?? -1; clk_live = 0; }
   if (s.clk && cfg.tc) { clk = s.clk.slice(); turn_start = now(); }
   last_from = last_to = NOSQ;
   if (G.n) { last_from = MFROM(G.moves[G.n - 1]); last_to = MTO(G.moves[G.n - 1]); }
@@ -424,6 +434,38 @@ function select_square() {
   do_move(cand[0]);
 }
 
+/* RESIGN (twice; Shift+Backspace at once): against the CPU you resign, in 2 players the side to move */
+function resign(now_) {
+  if (G.over) { status = 'Game over'; return; }
+  if (cfg.mode === MODE_CC) { status = 'Demo: NEW or MODE'; return; }
+  if (!now_ && confirm !== 'R') { confirm = 'R'; status = 'Resign? RESIGN again'; return; }
+  confirm = '';
+  if (thinking) move_now_discard();
+  resigner = cfg.mode === MODE_HC ? cfg.human : CUR().side;
+  G.over = 7; clk_live = 0; beep(330, 300); save_auto();
+}
+/* DRAW: the CPU accepts when it is worse (its last score <= -0.30), or from move 20 when not better (<= 0); in 2 players the other side ACCEPTs (F5 on
+   page 1, or HINT's key while the offer stands) on its turn, and moving declines */
+function draw() {
+  if (G.over) { status = 'Game over'; return; }
+  if (cfg.mode === MODE_CC) { status = 'Demo: no draw'; return; }
+  if (cfg.mode === MODE_HH) {
+    if (offer === (CUR().side ^ 1)) {
+      if (confirm !== 'A') { confirm = 'A'; status = 'Draw? ACCEPT again'; return; }
+      confirm = ''; offer = -1; G.over = 9; clk_live = 0; beep(660, 250); save_auto(); return;
+    }
+    if (offer === CUR().side) { status = 'Offered: now move'; return; }
+    offer = CUR().side; status = (offer ? 'Black' : 'White') + ' offers a draw';
+    return;
+  }
+  geometry();
+  const sc = cpu_scored ? cpu_score : (CUR().side === cfg.human ? -1 : 1) * E.evaluate(CUR());
+  if (!(sc <= -30 || (sc <= 0 && G.n >= 40))) { status = 'CPU declines the draw'; beep(220, 80); return; }
+  if (thinking) move_now_discard();
+  G.over = 9; clk_live = 0; beep(660, 250); save_auto();
+}
+const accept_pending = () => cfg.mode === MODE_HH && offer === (CUR().side ^ 1) && !G.over;
+
 function softkey(fn) {
   if (info_screen) { info_screen = 0; return; }
   if (promo_mode) {
@@ -431,32 +473,41 @@ function softkey(fn) {
     else if (fn === 5) { promo_mode = 0; sel = NOSQ; }
     return;
   }
+  const k = cfg.page * 6 + fn;
+  if (!((k === 9 && confirm === 'R') || ((k === 10 || k === 4) && confirm === 'A') || (k === 0 && confirm === 'N'))) confirm = '';
   if (fn === 5) { cfg.page = (cfg.page + 1) % 3; store.set('cfg', cfg); return; }
-  if (thinking && !(cfg.page === 0 && fn === 0)) { status = 'Thinking... (Esc: move now)'; return; }
-  switch (cfg.page * 6 + fn) {
-  case 0: if (thinking) move_now(); new_game(G.pos960 >= 0 ? Math.floor(Math.random() * 960) : -1); break;
+  if (thinking && !(k === 0 || k === 9 || k === 10)) { status = 'Thinking... (Esc: move now)'; return; }
+  switch (k) {
+  case 0:
+    if (cfg.mode === MODE_HC && !G.over && G.n >= 2) {   /* leaving a game against the CPU loses it */
+      if (confirm !== 'N') { confirm = 'N'; status = 'Quit=resign? NEW'; break; }
+      resign(1); break;                                  /* the result shows; NEW again for the next game */
+    }
+    if (thinking) move_now_discard();
+    new_game(G.pos960 >= 0 ? Math.floor(Math.random() * 960) : -1); break;
   case 1: cfg.level = (cfg.level + 1) % 10; status = 'Level ' + LEVELS[cfg.level].name; break;
   case 2: cfg.flip ^= 1; break;
   case 3: undo(); break;
-  case 4: hint(); break;
+  case 4: if (accept_pending()) draw(); else hint(); break;
   case 6: if (G.c960) { new_game(-1); status = 'Normal chess'; } else ask_960(); break;
   case 7: cfg.tc = (cfg.tc + 1) % TCS.length; clock_reset(); clock_update_live(); status = 'Clock ' + TCS[cfg.tc].name; break;
   case 8: cfg.human ^= 1; cfg.flip = cfg.human; if (cfg.mode !== MODE_HC) cfg.mode = MODE_HC; sel = NOSQ;
           status = 'You play ' + (cfg.human ? 'Black' : 'White'); break;
-  case 9: store.set('game', serialize()); status = 'Saved'; break;
-  case 10: status = deserialize(store.get('game')) ? 'Loaded' : 'No saved game'; break;
+  case 9: resign(0); break;
+  case 10: draw(); break;
+  case 15: store.set('game', serialize()); status = 'Saved'; break;
+  case 16: status = deserialize(store.get('game')) ? 'Loaded' : 'No saved game'; break;
   case 12: download('GAME.PGN', build_pgn()); status = copy(build_pgn()) ? 'PGN saved, copied' : 'PGN saved'; break;
   case 13: cfg.mode = (cfg.mode + 1) % MODE_CNT; sel = NOSQ; status = MODE_NAME[cfg.mode]; break;
   case 14: status = copy(E.pos_to_fen(CUR())) ? 'FEN copied' : 'FEN: see the console'; console.log(E.pos_to_fen(CUR())); break;
-  case 15: cfg.sound ^= 1; status = 'Sound ' + (cfg.sound ? 'on' : 'off'); break;
-  case 16: info_screen = 1; break;
   }
   store.set('cfg', cfg);
 }
 
 function key(k, shift) {
   if (info_screen) { info_screen = 0; return; }
-  if (shift && k === 'Backspace') { if (!G.over && G.n) { G.over = 7; clk_live = 0; save_auto(); } return; }
+  if (shift && k === 'Backspace') { resign(1); return; }
+  if (k === 'i') { info_screen = 1; return; }
   if (promo_mode) { if (k === 'Escape') { promo_mode = 0; sel = NOSQ; } return; }
   status = thinking ? status : '';
   switch (k) {
@@ -566,6 +617,7 @@ function draw_panel() {
   else if (promo_mode) s = 'Promote to?';
   else if (E.in_check(CUR())) { s = `CHECK! ${CUR().side ? 'Black' : 'White'} to move`; inv = 1; }
   else if (status) s = status;
+  else if (accept_pending()) s = (offer ? 'Black' : 'White') + ' offers a draw';
   else s = `${CUR().side ? 'Black' : 'White'} to move`;
   ptext(2, y, s, inv);
   y += h + 2;
@@ -594,7 +646,8 @@ function draw_panel() {
 }
 const menu_boxes = [];
 function draw_menu() {
-  const keys = promo_mode ? PROMO_MENU : MENU[cfg.page].map((k, i) => cfg.page === 1 && i === 0 && G.c960 ? '960*' : k);
+  const keys = promo_mode ? PROMO_MENU : MENU[cfg.page].map((k, i) => cfg.page === 1 && i === 0 && G.c960 ? '960*' :
+    accept_pending() && ((cfg.page === 0 && i === 4) || (cfg.page === 1 && i === 4)) ? 'ACCEPT' : k);
   menu_boxes.length = 0;
   const w = 64, gap = (LCD_X - 6 * w) / 5;
   for (let i = 0; i < 6; i++) {
@@ -651,7 +704,7 @@ document.addEventListener('keydown', ev => {
   const fk = /^F([1-6])$/.exec(ev.key);
   if (fk) { ev.preventDefault(); softkey(+fk[1] - 1); }
   else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' ', 'Escape', 'Backspace',
-            '1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(ev.key)) { ev.preventDefault(); key(ev.key, ev.shiftKey); }
+            '1', '2', '3', '4', '5', '6', '7', '8', '9', 'i'].includes(ev.key)) { ev.preventDefault(); key(ev.key, ev.shiftKey); }
   else return;
   redraw(); tick_game();
 });
@@ -669,6 +722,8 @@ canvas.addEventListener('pointerdown', ev => {
   redraw(); tick_game();
 });
 document.getElementById('calc').checked = !!cfg.calc;
+document.getElementById('sound').checked = !!cfg.sound;
+document.getElementById('sound').addEventListener('change', ev => { cfg.sound = ev.target.checked ? 1 : 0; store.set('cfg', cfg); });
 document.getElementById('calc').addEventListener('change', ev => { cfg.calc = ev.target.checked ? 1 : 0; store.set('cfg', cfg); });
 
 /* ---- the game loop: the CPU's moves, the demo, the clock ---- */

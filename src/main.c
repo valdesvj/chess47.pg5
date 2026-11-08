@@ -112,7 +112,13 @@ static char     end_txt[40];               /* "end <text>": how the game ended o
 static int8_t   draw_in;                   /* the opponent offers a draw (the PC: "drawoffer") */
 static int8_t   draw_out;                  /* we offered one: until the opponent moves or declines */
 static int8_t   claim_ok;                  /* the opponent left: the win can be claimed (the PC: "claim on") */
-static char     confirm;                   /* a second press needed: 'R' resign / abort, 'A' accept the draw */
+static char     confirm;                   /* a second press needed: 'R' resign / abort, 'A' accept the draw,
+                                              'N' NEW in an unfinished game against the CPU (it counts as resigning) */
+/* local games: SHIFT F4 RESIGN, SHIFT F5 DRAW (2 players: the other side ACCEPTs on its turn; the CPU decides) */
+static int8_t   resigner = -1;             /* the side that resigned (G->over 7) */
+static int8_t   offer = -1;                /* 2 players: the side that offered a draw, until the other side moves */
+static int      cpu_score;                 /* the CPU's last search score, its own view (the draw offers) */
+static int8_t   cpu_scored;
 static int32_t  usb_left = -1, usb_inc;    /* the engine's time left and increment, ms (-1: no clock) */
 
 /* ------------------------------------------------------------------ */
@@ -322,17 +328,19 @@ static const char *result_text(int code, int loser) {
   case 4: return "No material 1/2";
   case 5: return "Repetition 1/2";
   case 6: return loser == WHITE ? "W flag fell 0-1" : "B flag fell 1-0";
-  case 7: return loser == WHITE ? "W resigns 0-1" : "B resigns 1-0";
+  case 7: if (resigner >= 0) loser = resigner;
+          return loser == WHITE ? "W resigns 0-1" : "B resigns 1-0";
   case 8: return end_txt[0] ? end_txt : "Game over";
+  case 9: return "Draw agreed 1/2";
   }
   return "";
 }
 
 static const char *result_tag(void) {
-  int loser = CUR->side;
+  int loser = G->over == 7 && resigner >= 0 ? resigner : CUR->side;
   switch (G->over) {
   case 1: case 6: case 7: return loser == WHITE ? "0-1" : "1-0";
-  case 2: case 3: case 4: case 5: return "1/2-1/2";
+  case 2: case 3: case 4: case 5: case 9: return "1/2-1/2";
   }
   return "*";
 }
@@ -371,6 +379,7 @@ static void draw_panel(void) {
   else if (promo_mode) sprintf(s, "Promote to?");
   else if (in_check(CUR)) { sprintf(s, "CHECK! %s to move", CUR->side ? "Black" : "White"); inv = 1; }
   else if (status[0]) strcpy(s, status);
+  else if (cfg.mode == MODE_HH && offer == (CUR->side ^ 1)) sprintf(s, "%s offers a draw", offer ? "Black" : "White");
   else sprintf(s, "%s to move", CUR->side ? "Black" : "White");
   lcd_fill_rect(0, y, BX - 1, h, 0);
   ptext(2, y, s, inv);                        /* the result, check: highlighted (a black bar, white text) */
@@ -436,6 +445,11 @@ static void draw_menu(void) {
   if (cfg.page == 0 && VS_USB) {                       /* undo and hints are off vs USB: the game's own actions */
     keys[3] = G->n < 2 ? "ABORT" : "RESIGN";
     keys[4] = claim_ok ? "CLAIM" : draw_in ? "ACCEPT" : draw_out ? "DRAW*" : "DRAW";
+  } else if (cfg.page == 0 && shift) {                 /* SHIFT: the game's actions on F4 / F5 */
+    keys[3] = "RESIGN";
+    keys[4] = cfg.mode == MODE_HH && offer == (CUR->side ^ 1) ? "ACCEPT" : "DRAW";
+  } else if (cfg.page == 0 && cfg.mode == MODE_HH && offer == (CUR->side ^ 1) && !G->over) {
+    keys[4] = "ACCEPT";                                /* 2 players: the other side offered a draw */
   }
 
   lcd_draw_menu_keys(keys);
@@ -521,6 +535,8 @@ static void new_game_from(const Pos *start, int pos960) {
   G->pos960 = pos960;
   draw_in = draw_out = claim_ok = 0;
   confirm = 0;
+  resigner = offer = -1;
+  cpu_scored = 0;
   kirk = 0;
   sel = hint_from = hint_to = last_from = last_to = NOSQ;
   cur = cfg.flip ? 0x64 : 0x14;
@@ -571,6 +587,7 @@ static void do_move(Move m) {
   }
   turn_start = now_ms();
   move_to_san(p, m, G->san[G->n]);
+  if (offer >= 0 && mover != offer) offer = -1;   /* 2 players: moving declines the other side's offer */
   if (VS_USB) {                                   /* a move ends the other side's draw offer (Lichess) */
     if (usb_side(mover)) draw_out = 0;            /* the opponent moved: our offer lapsed */
     else draw_in = 0;                             /* we moved: their offer declined */
@@ -774,6 +791,7 @@ static void cpu_move(void) {
     if (cfg.tc && !L->ms) depth = L->depth;     /* fixed-depth levels stay weak */
     Result r = run_search(depth, ms, L->noise);
     m = r.best ? r.best : G->legal[0];
+    cpu_score = r.score; cpu_scored = 1;
   }
   do_move(m);
   if (cfg.level == 0 && !G->over) sprintf(status, "CRAZY played %s", G->san[G->n - 1]);
@@ -1168,6 +1186,38 @@ static void finish_960_entry(void) {
   sprintf(status, "Chess960 #%d", n);
 }
 
+/* local games: RESIGN (SHIFT F4, twice; SHIFT BSP at once). Against the CPU you resign, in 2 players the side
+   to move */
+static void local_resign(int now) {
+  if (G->over) { strcpy(status, "Game over"); return; }
+  if (cfg.mode == MODE_CC) { strcpy(status, "Demo: NEW or MODE"); return; }
+  if (!now && confirm != 'R') { confirm = 'R'; strcpy(status, "Resign? RESIGN again"); return; }
+  confirm = 0;
+  resigner = (int8_t)(cfg.mode == MODE_HC ? cfg.human : CUR->side);
+  G->over = 7; clk_live = 0;
+  beep(330, 300);
+}
+
+/* local games: DRAW (SHIFT F5). Against the CPU it accepts when it is worse (its last score -0.30 or less), or
+   from move 20 when it is not better (<= 0); in 2 players the other side sees ACCEPT on F5 on its turn, and moving declines */
+static void local_draw(void) {
+  if (G->over) { strcpy(status, "Game over"); return; }
+  if (cfg.mode == MODE_CC) { strcpy(status, "Demo: no draw"); return; }
+  if (cfg.mode == MODE_HH) {
+    if (offer == (CUR->side ^ 1)) {                    /* the other side offered: accept */
+      if (confirm != 'A') { confirm = 'A'; strcpy(status, "Draw? ACCEPT again"); return; }
+      confirm = 0; offer = -1; G->over = 9; clk_live = 0; beep(660, 250); return;
+    }
+    if (offer == CUR->side) { strcpy(status, "Offered: now move"); return; }
+    offer = (int8_t)CUR->side;
+    sprintf(status, "%s offers a draw", CUR->side ? "Black" : "White");
+    return;
+  }
+  int sc = cpu_scored ? cpu_score : -evaluate(CUR) * (CUR->side == cfg.human ? 1 : -1);
+  if (!(sc <= -30 || (sc <= 0 && G->n >= 40))) { strcpy(status, "CPU declines the draw"); beep(220, 80); return; }
+  G->over = 9; clk_live = 0; beep(660, 250);
+}
+
 static void handle_softkey(int k) {
   int fn = k - KEY_F1;
   if (promo_mode) {
@@ -1176,12 +1226,19 @@ static void handle_softkey(int k) {
     return;
   }
   switch (cfg.page * 6 + fn) {
-  case 0:  new_game(G->pos960 >= 0 ? (int)(rnd() % 960) : -1); break;               /* NEW */
+  case 0:  if (cfg.mode == MODE_HC && !G->over && G->n >= 2) {                        /* NEW */
+             if (confirm != 'N') { confirm = 'N'; strcpy(status, "Quit=resign? NEW"); break; }
+             local_resign(1);                         /* leaving a game against the CPU loses it: the */
+             break;                                   /* result shows, NEW again for the next game */
+           }
+           new_game(G->pos960 >= 0 ? (int)(rnd() % 960) : -1); break;
   case 1:  cfg.level = (int8_t)((cfg.level + 1) % 10);                              /* LEVEL */
            sprintf(status, "Level %s", LEVELS[cfg.level].name); break;
   case 2:  cfg.flip ^= 1; break;                                                     /* FLIP */
   case 3:  if (VS_USB) usb_resign(); else undo(); break;                            /* UNDO (vs USB: RESIGN) */
-  case 4:  if (VS_USB) usb_draw(); else hint(); break;                               /* HINT (vs USB: DRAW) */
+  case 4:  if (VS_USB) usb_draw();                                                   /* HINT (vs USB: DRAW) */
+           else if (cfg.mode == MODE_HH && offer == (CUR->side ^ 1) && !G->over) local_draw();   /* ACCEPT */
+           else hint(); break;
   case 6: if (chess960) { new_game(-1); strcpy(status, "Normal chess");} 
           else {  start_960_entry(); } break; /* 960 / normal-chess toggle */                                               /* 960 */
   case 7:  cfg.tc = (int8_t)((cfg.tc + 1) % TC_CNT); clock_reset(); clock_update_live(); /* CLOCK */
@@ -1221,7 +1278,8 @@ static void handle_softkey(int k) {
 
 static void handle_key(int key) {
   if (key == KEY_SHIFT) { shift = !shift; return; }
-  if (!(cfg.page == 0 && ((key == KEY_F4 && confirm == 'R') || (key == KEY_F5 && confirm == 'A'))))
+  if (!(cfg.page == 0 && ((key == KEY_F4 && confirm == 'R') || (key == KEY_F5 && confirm == 'A') ||
+                          (key == KEY_F1 && confirm == 'N'))))
     confirm = 0;                                   /* any other key: no resign / accept pending */
 
   if (num_mode) {
@@ -1251,8 +1309,10 @@ static void handle_key(int key) {
       return;
     case KEY_BSP: /* resign */
       if (VS_USB) { confirm = 'R'; usb_resign(); return; }   /* vs USB: the PC must know (one press: SHIFT is the care) */
-      if (!G->over && G->n) { G->over = 7; clk_live = 0; }
+      local_resign(1);
       return;
+    case KEY_F4: if (cfg.page == 0 && !VS_USB) { local_resign(0); return; } break;   /* SHIFT F4 RESIGN */
+    case KEY_F5: if (cfg.page == 0 && !VS_USB) { local_draw(); return; } break;      /* SHIFT F5 DRAW */
     case KEY_SIGMA: show_info(); return;
     }
   }

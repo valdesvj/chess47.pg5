@@ -38,7 +38,10 @@ To return to Free42: in Chess 47 press **SHIFT 0 (SETUP) → System**, or use
 | **+** or **−** | zoom: the board the full screen height (30 px squares), the soft keys hidden (they still work); again: the normal view |
 | **SHIFT EXIT** | power off. The game is autosaved and resumed at power on |
 | **SHIFT 0** | setup: time/date, beep, USB disk, **System**, About |
-| **SHIFT ←** | resign |
+| **SHIFT ←** | resign at once |
+| **SHIFT F4** RESIGN | resign (press SHIFT F4 twice). Against the CPU you resign; with 2 players the side to move |
+| **SHIFT F5** DRAW | offer a draw. The CPU accepts when it is worse, or from move 20 when it is not better. With 2 players the other side sees **ACCEPT** on F5 on its turn (press twice); a move declines |
+| **NEW** in a game | against the CPU an unfinished game counts as resigned: NEW twice (the result shows), NEW again for the next game |
 | **SHIFT Σ+** | info screen |
 
 Castling: select the king, then press on the **rook**. In classic games you can
@@ -69,7 +72,7 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
 
 The status line always shows the game's state first: **CHECK!** (inverted) as soon as a king is attacked, even
 while the computer thinks. At the end a box on the board says what happened, why, and the result:
-**CHECKMATE**, **STALEMATE**, **DRAW** (50-move rule, no mating material, 3-fold repetition), **TIME** (a flag
+**CHECKMATE**, **STALEMATE**, **DRAW** (50-move rule, no mating material, 3-fold repetition, agreed), **TIME** (a flag
 fell), **RESIGNS**. With USB on, the result also goes to the PC as a `result 1-0 ...` line.
 
 ## Strength (measured against Stockfish)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """build_web.py - web/chess47.html, Chess 47 in one file: web/app.html with web/engine.js (the engine, also the
-Web Worker's), the piece bitmaps of src/pieces.h and web/app.js. MIT License."""
+Web Worker's), the piece bitmaps of src/pieces.h and web/app.js. GNU GPLv3."""
 import json, os, re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 rd = lambda p: open(os.path.join(ROOT, p), encoding='utf-8').read()

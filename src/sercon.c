@@ -11,7 +11,7 @@
  *   usbview_*      nothing to send: DMCP streams the LCD; key 77 (the PC sent L) -> redraw + lcd_forced_refresh
  *
  * The PC adds 0x12 (channel 2) before each line it sends, and reads our lines on channel 2 (tools/dm42port.py).
- * Copyright (C) 2026 Victor Valdes - MIT. */
+ * Copyright (C) 2026 Victor Valdes - GPLv3. */
 #include <main.h>
 #include <dmcp.h>
 #include <string.h>

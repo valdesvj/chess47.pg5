@@ -1,6 +1,6 @@
 /*
  * CHESS47 web - the DM42n program's screen and keys in the browser (src/main.c), the engine (engine.js) in a
- * Web Worker. (C) 2026 Victor Valdes - MIT License
+ * Web Worker. (C) 2026 Victor Valdes - GNU GPLv3
  */
 'use strict';
 (function () {
@@ -667,7 +667,7 @@ function draw_info() {
     `Last search: depth ${last.depth}, ${last.nodes} nodes`,
     last.ms ? `${Math.round(last.nodes / Math.max(1, last.ms))}k nodes/s here` : '',
     'Hash table: 16 MB',
-    'MIT (c) 2026 Victor Valdes',
+    'GPLv3 (c) 2026 Victor Valdes',
     'Any key: back',
   ];
   t.forEach((s, i) => s && texts.push([12, 6 + i * 23, s, i === 0 ? 1 : 0]));

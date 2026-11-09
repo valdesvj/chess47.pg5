@@ -1,6 +1,6 @@
 /*
  * CHESS47 for DM42n (DMCP5) - portable chess engine
- * (C) 2026 Victor Valdes - MIT License
+ * (C) 2026 Victor Valdes - GNU GPLv3
  *
  * 0x88 board, copy-make, legal move generation with Chess960 castling,
  * PVS alpha-beta with transposition table, null move, LMR and quiescence.

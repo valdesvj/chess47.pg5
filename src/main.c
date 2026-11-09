@@ -1,6 +1,6 @@
 /*
  * CHESS 47 for SwissMicros DM42n (DMCP5 native program, .pg5)
- * (C) 2026 Victor Valdes (valdes.vj@gmail.com) - MIT License
+ * (C) 2026 Victor Valdes (valdes.vj@gmail.com) - GNU GPLv3
  *
  * Built with the SwissMicros DMCP5 SDK (BSD-3, NOMAS).
  *
@@ -1070,7 +1070,7 @@ static void show_info(void) {
   text_at(t24, 4, y, "CHESS 47  v" PROGRAM_VERSION, 1);
   y += lh(t24) + 6;
   text_at(t20, 4, y, "Native DMCP5 chess for the DM42n", 0); y += h;
-  text_at(t20, 4, y, "(C) 2026 Victor Valdes - MIT", 0); y += h + 6;
+  text_at(t20, 4, y, "(C) 2026 Victor Valdes - GPLv3", 0); y += h + 6;
   sprintf(s, "Hash table: %u KB", (unsigned)(eng_tt_bytes() / 1024)); text_at(t20, 4, y, s, 0); y += h;
   sprintf(s, "Free heap: %d KB  (largest %d KB)", sys_free_mem() / 1024, sys_largest_free_mem() / 1024);
   text_at(t20, 4, y, s, 0); y += h;

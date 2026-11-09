@@ -1,6 +1,6 @@
 /* usbview.h - Chess 47: the screen to the PC over USB, for tools/dm42view.py. Two builds of the same interface:
  * src/sercon.c (make, USB=sercon: DMCP5 3.58's serial console streams the LCD) and src/usbview.c (make USB=tinyusb).
- * MIT. */
+ * GPLv3. */
 #ifndef CHESS47_USBVIEW_H
 #define CHESS47_USBVIEW_H
 

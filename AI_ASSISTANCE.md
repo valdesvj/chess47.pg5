@@ -20,7 +20,7 @@ This project was **developed with the help of AI** — Claude (Anthropic), Gemin
 
 ## License
 
-This does not affect the MIT license. All code remains open-source and fully accessible.
+This does not affect the GPLv3 license. All code remains open-source and fully accessible.
 
 ---
 

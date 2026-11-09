@@ -1,0 +1,92 @@
+diff --git a/src/main.c b/src/main.c
+--- a/src/main.c
++++ b/src/main.c
+@@ -13,4 +13,5 @@
+ #include <dmcp.h>
+ #include <stdio.h>
++#include <stdarg.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -879,6 +879,47 @@
+     if (k == KEY_EXIT || k == KEY_ENTER || k == KEY_F6) break;
+   }
+   wait_for_key_release(-1);
+ }
+ 
++/* Append formatted text without writing past the destination buffer. */
++static int qr_appendf(char **out, size_t *remaining, const char *fmt, ...) {
++  if (*remaining == 0) return 0;
++
++  va_list ap;
++  va_start(ap, fmt);
++  int n = vsnprintf(*out, *remaining, fmt, ap);
++  va_end(ap);
++
++  if (n < 0 || (size_t)n >= *remaining) {
++    (*out)[*remaining - 1] = '\0';
++    *remaining = 0;
++    return 0;
++  }
++
++  *out += n;
++  *remaining -= (size_t)n;
++  return 1;
++}
++
++/* Build the QR payload (optional FEN, moves, result) within cap bytes. */
++static int qr_build_text(char *buf, size_t cap) {
++  if (cap == 0) return 0;
++
++  char *out = buf;
++  size_t remaining = cap;
++  *out = '\0';
++
++  if (chess960 || G->hist[0].fullmove != 1) {
++    char fen[100];
++    pos_to_fen(&G->hist[0], fen);
++    if (!qr_appendf(&out, &remaining, "[FEN \"%s\"]\n", fen)) return 0;
++  }
++
++  int col = 0;
++  for (int i = 0; i < G->n; i++) {
++    const Pos *p = &G->hist[i];
++    char tok[20];
++    int n;
++    if (p->side == WHITE)
++      n = snprintf(tok, sizeof tok, "%d. %s", p->fullmove, G->san[i]);
++    else if (i == 0)
++      n = snprintf(tok, sizeof tok, "%d... %s", p->fullmove, G->san[i]);
++    else
++      n = snprintf(tok, sizeof tok, "%s", G->san[i]);
++
++    if (n < 0 || (size_t)n >= sizeof tok) return 0;
++    if (!qr_appendf(&out, &remaining, "%s%s", col ? " " : "", tok)) return 0;
++    col += n + (col ? 1 : 0);
++  }
++
++  return qr_appendf(&out, &remaining, "%s%s\n", col ? " " : "", result_tag());
++}
++
+ static void show_qr(void) {
++  if (cfg.mode == MODE_CC) {
++    strcpy(status, "QR unavailable in demo");
++    return;
++  }
++
+   /* moves only (plus FEN for 960) keeps the code small and scannable */
+   char *txt = G->fbuf;
+-  char *o = txt;
+-  if (chess960 || G->hist[0].fullmove != 1) {
+-    char fen[100];
+-    pos_to_fen(&G->hist[0], fen);
+-    o += sprintf(o, "[FEN \"%s\"]\n", fen);
+-  }
+-  build_pgn(o, 0);
+-  int len = (int)strlen(txt);
++  int text_ok = qr_build_text(txt, sizeof G->fbuf);
++  int len = text_ok ? (int)strlen(txt) : 0;
+   QRCode qr;
+   uint8_t *buf = NULL;
+   int ok = -1;
+-  for (int v = 1; v <= 40; v++) {
++  for (int v = 1; text_ok && v <= 40; v++) {

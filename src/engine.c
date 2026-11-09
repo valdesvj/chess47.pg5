@@ -1,6 +1,6 @@
 /*
  * CHESS47 for DM42n (DMCP5) - portable chess engine
- * (C) 2026 Victor Valdes - MIT License
+ * (C) 2026 Victor Valdes - GNU GPLv3
  *
  * Memory note: DMCP5 gives a program only 8 KB of static RAM, so every
  * table here (Zobrist keys, hash table, search stacks) lives on the heap

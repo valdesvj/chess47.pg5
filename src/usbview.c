@@ -2,7 +2,7 @@
  *   CHESS47 LCD 400 240\n   240 lines of 100 hex digits (x = 0 first, most significant bit first, 1 = ink)   END\n
  * The DMCP line buffer's layout (byte order, bit order, inverted data) is learnt at start by setting one pixel and
  * looking which bit changes, so it does not depend on undocumented details. tools/dm42view.py shows the frames (the same viewer as NAV47).
- * Copyright (C) 2026 Victor Valdes - MIT (as Chess 47). */
+ * Copyright (C) 2026 Victor Valdes - GPLv3 (as Chess 47). */
 #include <main.h>
 #include <dmcp.h>
 #include <string.h>

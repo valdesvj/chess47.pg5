@@ -292,6 +292,6 @@ Files: `src/engine.c` (portable engine), `src/main.c` (DMCP5 UI), `src/pieces.h`
 
 Written with the help of AI. See `AI_ASSISTANCE.md` for how it was used and checked.
 
-MIT © 2026 Victor Valdes. `dmcp/` and `stm32_program.ld` are from the SwissMicros
+GNU GPLv3 © 2026 Victor Valdes. `dmcp/` and `stm32_program.ld` are from the SwissMicros
 DMCP5 SDK (BSD-3, released "NOMAS": not manufacturer supported). Please don't
 contact SwissMicros about this program.

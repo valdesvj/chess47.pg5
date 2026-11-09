@@ -1,5 +1,5 @@
 /*
- * CHESS47 - piece and emoticon bitmaps (C) 2026 Victor Valdes - MIT License
+ * CHESS47 - piece and emoticon bitmaps (C) 2026 Victor Valdes - GNU GPLv3
  *
  * 20x20 glyphs. '#' = body, '+' = inner detail line, '.' = transparent.
  * White pieces: black outline + details on a white body.

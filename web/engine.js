@@ -1,6 +1,6 @@
 /*
  * CHESS47 web - the engine of src/engine.c in JavaScript, line for line
- * (C) 2026 Victor Valdes - GNU GPLv3
+ * (C) 2026 Victor Valdes - GPL-3.0-or-later
  *
  * 0x88 board, copy-make, legal move generation with Chess960 castling, PVS alpha-beta with a transposition
  * table, null move, LMR and quiescence. The 64-bit Zobrist keys are two 32-bit halves (hi, lo), made by the

@@ -1,6 +1,6 @@
 /* jscheck.c - the C engine's answers for web/engine.js (test/test_web.js compares them): for each line of
  * stdin "FEN|search depth|perft depth[|noise]": the perft count and a fixed-depth search (no time, no noise, the hash
- * table cleared, 16 MB: the web engine's 2^20 entries): best move, score, depth, nodes. GNU GPLv3. */
+ * table cleared, 16 MB: the web engine's 2^20 entries): best move, score, depth, nodes. GPL-3.0-or-later. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

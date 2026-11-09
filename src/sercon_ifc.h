@@ -5,7 +5,7 @@
  * Only for a .pg5 built with PLATFORM_IFC_VER 18 (make, USB=sercon): on an older DMCP5 these slots hold other
  * functions and calling one crashes the calculator; DMCP5's loader refuses a program with a newer IFC than its own,
  * so a build with IFC 18 does not even load there.
- * GPLv3 (Chess 47); the names and values are SwissMicros'. */
+ * GPL-3.0-or-later (Chess 47); the names and values are SwissMicros'. */
 #ifndef CHESS47_SERCON_IFC_H
 #define CHESS47_SERCON_IFC_H
 #include <stdint.h>

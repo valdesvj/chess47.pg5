@@ -2,11 +2,12 @@
 """dm42port.py - the DM42n's serial port for the PC tools (usb_stockfish.py, lichess_board.py): Chess 47's text lines,
 whichever USB the .pg5 was built with.
 
-  DMCP5 3.58's serial console (make, the default): one byte stream, channels. A byte 0x10 + n switches to channel n;
-  Chess 47's lines are on channel 2, DMCP's own (LCD rows, key reports, V) on channel 0. We send each line as 0x12
-  + the line + '\\n' (DMCP passes channel 2 to the program); a line is ASCII, a binary part has the top bit set.
-  TinyUSB (make USB=tinyusb): plain text lines, with the screen frames ("CHESS47 LCD 400 240" ... "END") among them.
-  The 0x12 we send is not a printable character: the TinyUSB build drops it. So the same tools work with both.
+  DMCP5's serial console, in both builds (make: DMCP5 3.58's own; make USB=tinyusb: the same console played over
+  Chess 47's own TinyUSB port): one byte stream, channels. A byte 0x10 + n switches to channel n; Chess 47's lines
+  are on channel 2, the console's own (LCD rows, V) on channel 0. We send each line as 0x12 + the line + '\\n'
+  (the console passes channel 2 to the program); a line is ASCII, a binary part has the top bit set.
+  Older TinyUSB builds sent plain text lines with screen frames ("CHESS47 LCD 400 240" ... "END") among them, and
+  dropped the 0x12: still read.
 
   port = Port(path)            # opens it raw, read and write (opening raises DTR: DMCP's "connected")
   port.send('e7e5')            # one line to Chess 47
@@ -37,7 +38,7 @@ def find():
 
 
 class Screen:
-    """the DM42n's screen from the same stream: DMCP's LCD rows (channel 0) or TinyUSB's frames"""
+    """the DM42n's screen from the same stream: the console's LCD rows (channel 0), or an older TinyUSB build's frames"""
 
     def __init__(self, png=None, view=False, scale=3, every=0.3):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -107,7 +108,7 @@ class Screen:
 def keyboard(port, screen=None, hold=0.06, gap=0.12):
     """--keys: the PC keyboard types on the calculator while a bridge runs (dm42view.py's map: digits . + - * /,
     Enter, Backspace, Esc = EXIT, arrows, Tab = SHIFT, F1-F6, ':NAME' Enter for any key); a thread; the terminal
-    goes back to normal at the end. Needs DMCP5 3.58's serial console (the TinyUSB build takes no keys)."""
+    goes back to normal at the end. Both builds take keys (an older TinyUSB build's text frames do not)."""
     import atexit
     import termios
     import tty
@@ -196,7 +197,7 @@ class Port:
             self.typing.keys.fd = self.fd
 
     def send(self, line):
-        """one line to Chess 47: 0x12 first (the serial console's channel 2; dropped by the TinyUSB build)"""
+        """one line to Chess 47: 0x12 first (the serial console's channel 2; an older TinyUSB build dropped it)"""
         if self.tty:
             try:
                 os.write(self.fd, bytes([0x10 + CH]) + line.encode('ascii') + b'\n')
@@ -240,7 +241,7 @@ class Port:
                         self.screen.row(raw)
                     continue
                 line = bytes(c for c in raw if c < 0x80).strip().decode('ascii', 'replace')
-                if line.endswith('LCD 400 240'):         # TinyUSB: a screen frame, to its END
+                if line.endswith('LCD 400 240'):         # an older TinyUSB build: a screen frame, to its END
                     frame, rows = True, []
                 elif frame:
                     frame = line != 'END'

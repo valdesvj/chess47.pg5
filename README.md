@@ -201,24 +201,33 @@ network take about a second a move. For a bot without the calculator (the same e
 `build/chess47-uci` with [lichess-bot](https://github.com/lichess-bot-devs/lichess-bot).
 
 
-## The USB: DMCP5 3.58's serial console (default) or TinyUSB
+## The USB: DMCP5's serial console, from DMCP5 3.58 or over TinyUSB
 
-**`make` (USB=sercon): DMCP5 3.58's own serial console, no TinyUSB.** Needs DMCP5 3.58 on the DM42n (SwissMicros'
-preliminary "DMCP5 Serial Console API", IFC 3.18: the .pg5 is built with IFC 18, and an older DMCP5 refuses to load
-it). USB on turns on DMCP's console and its LCD stream, and gives your DMCP settings back when it goes off.
+Two builds, **the same stream to the PC** (SwissMicros' preliminary "DMCP5 Serial Console API", IFC 3.18), so the
+same tools and commands work with both:
+
+| build | runs the USB | needs | the calculator while USB is on |
+|---|---|---|---|
+| `make` (USB=sercon) | DMCP5 3.58 itself | DMCP5 3.58 (the .pg5 has IFC 18; an older DMCP5 refuses to load it) | sleeps; a 100 ms timer wakes it to read the PC's lines |
+| `make USB=tinyusb` | Chess 47, with **TinyUSB** (`src/usb/`, `third_party/tinyusb`, MIT) | any DMCP5 | does not sleep (it would stop the USB) |
+
+USB on turns on the console and its LCD stream, and gives your DMCP settings back when it goes off.
 * The moves and the other lines (`newgame`, `opponent`, `result` ...) go on **channel 2**, whole lines, at most
   128 bytes a write (the data sheet: longer or quick writes can lose their ends); the PC's lines come on channel 2
   too. The PC tools add the byte `0x12` before each line and keep only channel 2 (`tools/dm42port.py`).
-* The screen: **DMCP sends it itself** (the changed LCD rows on channel 0); when the PC asks for the whole screen
-  (`L`), DMCP gives Chess 47 the key code 77 and it redraws.
-* The calculator sleeps as usual; while USB is on, a 100 ms timer wakes it to read the PC's lines.
-* `src/sercon.c` (the same interface as the TinyUSB code, so the game does not change), `src/sercon_ifc.h` (the
-  three calls, from the data sheet: replace with the official 3.58 headers when you have them).
+* The screen: the changed LCD rows on channel 0; when the PC asks for the whole screen (`L`), Chess 47 gets the key
+  code 77 and redraws. The PC's keys (`KPhh` / `KR`) come as real keys (`--keys` in the tools).
+* `src/sercon.c` is the program side in both builds; `src/sercon_ifc.h` has the three calls, from the data sheet
+  (replace with the official 3.58 headers when you have them).
+* In the TinyUSB build `src/usb/usbcon.c` **plays DMCP's serial console** over our own port (the firmware's
+  `usb_acm_on()` leaves the DM42n's USB core in soft-disconnect): the same channels, FIFOs and overflow rules, the same
+  `V`, `KPhh`/`KR`/`K hh` and `L`, the same LCD rows. On purpose it differs only in: `V` answers `DMCP5 TinyUSB`, `B`
+  (DFU) is ignored, no key reports (DMCP5 has no call for programs to read the keys held), and a write waits for the
+  PC instead of losing its end. `make test-usb` checks it on the PC against the data sheet; the simulator gives the
+  same `acm.out` with both (`make sim`, `make sim USB=tinyusb`), and `test/test_usb_actions.py` passes with both.
+  When DMCP5 3.58 is released, plain `make` is all that changes.
 
-**`make USB=tinyusb`: our own serial port, any DMCP5.** The firmware's own `usb_acm_on()` leaves the USB port
-disconnected (the DM42n's USB core stays in soft-disconnect), so Chess 47 drives the USB itself with **TinyUSB**
-(`src/usb/`, `third_party/tinyusb`, MIT): one CDC serial port, text lines, and every screen as a frame
-(`CHESS47 LCD 400 240`, 240 lines of hex, `END`). While USB is on the calculator does not sleep.
+`make both` builds the two side by side: `build/CHESS47.pg5` (DMCP5 3.58) and `build/tinyusb/CHESS47.pg5` (any DMCP5).
 
 `tools/usb_stockfish.py`, `tools/lichess_board.py` and `tools/dm42view.py` work with both builds:
 
@@ -263,7 +272,7 @@ then packs the `.pg5`: program size word plus SHA1 trailer.
 
 ```bash
 # simulator: real main.c + engine.c against a fake DMCP layer, renders the LCD
-make sim                    # USB = DMCP's serial console (test/sim/sercon_sim.c); make sim USB=tinyusb: TinyUSB
+make sim                    # USB = DMCP's serial console (test/sim/sercon_sim.c); USB=tinyusb: src/usb/usbcon.c
 cd build && ./sim 5 8 8 5 WAIT:2000 SNAP:shot && python3 ../test/sim/render.py shot shot.png
 # the USB: ./acm.out (what the calculator sends), ./acm.in (the PC's lines; ACM_FREE=1: whenever asked);
 # HOSTL in the key script = the PC sends L (the whole screen)

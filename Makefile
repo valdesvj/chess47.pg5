@@ -4,7 +4,8 @@
 ######################################
 TARGET = CHESS47
 # make                 the USB through DMCP5 3.58's serial console (needs DMCP5 3.58: the .pg5 has IFC 18)
-# make USB=tinyusb     our own TinyUSB serial port (any DMCP5)
+# make both            both: build/CHESS47.pg5 and build/tinyusb/CHESS47.pg5
+# make USB=tinyusb     the same serial console over our own TinyUSB port (any DMCP5): the same stream, the same tools
 # make sim             the PC simulator (build/sim); make sim USB=tinyusb for the TinyUSB stand-in
 
 ifdef DEBUG
@@ -28,9 +29,11 @@ ifeq ($(USB),sercon)
 C_SOURCES += src/sercon.c
 C_DEFS += -DPLATFORM_IFC_VER=18
 else
-# the USB serial port (our own, with TinyUSB: the firmware's usb_acm_on leaves the port disconnected)
+# DMCP5's serial console played over our own TinyUSB port (src/usb/usbcon.c; the firmware's usb_acm_on leaves the
+# port disconnected): the same src/sercon.c, the same stream
 TUSB = third_party/tinyusb/src
-C_SOURCES += src/usbview.c src/usb/usbser.c src/usb/usb_desc.c \
+C_DEFS += -DSERCON_TINYUSB
+C_SOURCES += src/sercon.c src/usb/usbcon.c src/usb/tport.c src/usb/usb_desc.c \
              $(TUSB)/tusb.c $(TUSB)/common/tusb_fifo.c $(TUSB)/device/usbd.c $(TUSB)/class/cdc/cdc_device.c \
              $(TUSB)/portable/synopsys/dwc2/dcd_dwc2.c $(TUSB)/portable/synopsys/dwc2/dwc2_common.c
 endif
@@ -91,17 +94,33 @@ $(BUILD_DIR):
 test: test/perft.c src/engine.c src/engine.h
 	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/perft test/perft.c src/engine.c && $(BUILD_DIR)/perft
 
+# both .pg5 at once: build/<NAME>.pg5 (DMCP5 3.58's console) and build/tinyusb/<NAME>.pg5 (any DMCP5)
+both:
+	$(MAKE) USB=sercon
+	$(MAKE) USB=tinyusb BUILD_DIR=$(BUILD_DIR)/tinyusb
+
 clean:
 	-rm -fR .dep $(BUILD_DIR)
 
 -include $(shell mkdir .dep 2>/dev/null) $(wildcard .dep/*)
 
-.PHONY: clean all test
+.PHONY: both clean all test test-usb
+
+# src/usb/usbcon.c (the TinyUSB build's serial console) on the PC: a fake port and LCD, the data sheet's stream
+test-usb:
+	mkdir -p $(BUILD_DIR)
+	gcc -std=gnu11 -Wall -O1 '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' \
+	    -DCHESS47_SIM -DSERCON_TINYUSB -Itest/sim -Isrc -Isrc/usb -o $(BUILD_DIR)/usbcon_test \
+	    test/usbcon_test.c src/usb/usbcon.c
+	$(BUILD_DIR)/usbcon_test
 
 # the PC simulator: real main.c + engine.c against a fake DMCP layer (test/sim); its USB writes ./acm.out, reads ./acm.in
-SIM_USB = $(if $(filter sercon,$(USB)),src/sercon.c test/sim/sercon_sim.c,src/usbview.c test/sim/usbser_sim.c)
+# sercon: test/sim/sercon_sim.c plays DMCP's serial console; tinyusb: src/usb/usbcon.c over test/sim/tport_sim.c
+SIM_USB = $(if $(filter sercon,$(USB)),src/sercon.c test/sim/sercon_sim.c,\
+                src/sercon.c src/usb/usbcon.c test/sim/tport_sim.c)
+SIM_DEFS = $(if $(filter sercon,$(USB)),,-DSERCON_TINYUSB)
 sim:
 	mkdir -p $(BUILD_DIR)
-	gcc -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' -DCHESS47_SIM \
+	gcc -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' -DCHESS47_SIM $(SIM_DEFS) \
 	    -Itest/sim -Isrc -Isrc/usb -o $(BUILD_DIR)/sim test/sim/sim.c src/main.c src/engine.c $(SIM_USB)
 .PHONY: sim

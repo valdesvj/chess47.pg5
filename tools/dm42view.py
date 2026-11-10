@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""dm42view.py - the DM42n's screen in your terminal (or as PNG), sent over USB: NAV47 (>> >> USB) with DMCP5 3.58's
-serial console (DMCP streams the LCD rows; the default build), or NAV47 / Chess 47 over their own TinyUSB port.
+"""dm42view.py - the DM42n's screen in your terminal (or as PNG), sent over USB by NAV47 (>> >> USB) or Chess 47 through
+DMCP5's serial console: DMCP5 3.58's own (make) or the same console played over their TinyUSB port (make USB=tinyusb).
+Both builds send the same stream, so every option below works with both.
 
     python3 tools/dm42view.py                     # the DM42n (found by name), Braille dots: 200 x 60 characters
     python3 tools/dm42view.py /dev/ttyACM1        # or a given port
@@ -17,10 +18,11 @@ serial console (DMCP streams the LCD rows; the default build), or NAV47 / Chess 
     python3 tools/dm42view.py --c47 "2 ENTER 3 + SIN STO 01" --once --png .   # C47 commands keyed in (c47keys.py)
     python3 tools/dm42view.py acm.out --once --png .   # the simulator's stream (make sim; build/sim ... HOSTL)
 
-The format is found by itself:
-  DMCP5 3.58 serial console: channel-0 lines "L <yy>" + 400 pixels 7 bits a byte (SwissMicros' data sheet); the tool
-  sends V (who is there) and L (the whole screen) when it opens the port; a frame when the rows stop for --wait s.
-  TinyUSB: "NAV47 LCD 400 240" (or "CHESS47 LCD ..."), 240 lines of 100 hex digits (1 = ink), "END".
+The stream: DMCP5's serial console, channel-0 lines "L <yy>" + 400 pixels 7 bits a byte (SwissMicros' data sheet);
+the tool sends V (who is there: the status line shows "DMCP5 3.58" or "TinyUSB") and L (the whole screen) when it
+opens the port; a frame when the rows stop for --wait s.
+Older TinyUSB builds (before the serial console was played over TinyUSB) sent text frames: "NAV47 LCD 400 240" (or
+"CHESS47 LCD ..."), 240 lines of 100 hex digits (1 = ink), "END"; still shown, but they take no keys.
 On Linux the user needs access to the port: sudo usermod -aG uucp $USER (Arch) or dialout (Debian), then log in again.
 """
 import argparse
@@ -83,6 +85,14 @@ class Dmcp:
         if self.ch == 0 and text.startswith(b'V|'):
             self.ident = text.decode('ascii', 'replace')
         return False
+
+    def who(self):
+        """the V answer, short: 'NAV47 0.1 via DMCP5 3.58' / 'NAV47 0.1 via TinyUSB'"""
+        if not self.ident:
+            return ''
+        f = dict(x.split(' ', 1) for x in self.ident.split('|')[1:] if ' ' in x)
+        via = 'TinyUSB' if f.get('DMCP5') == 'TinyUSB' else 'DMCP5 ' + f.get('DMCP5', '?')
+        return ('%s %s via %s' % (f.get('HW', '?'), f.get('VER', ''), via)).replace('  ', ' ')
 
 
 def frames(path, raw=False, wait=0.08, opened=None, typing=None):
@@ -293,7 +303,7 @@ def main():
     n = 0
     opened = typing = term = None
     try:
-        if a.keys or a.send or a.c47:                    # the keys go over DMCP5 3.58's serial console
+        if a.keys or a.send or a.c47:                    # the keys go over the serial console (both builds)
             opened = open_port(a.port)
             if opened[1] is None:
                 sys.exit('--keys / --send / --c47 need the serial port, not a file')
@@ -324,7 +334,7 @@ def main():
                     art = braille(px, x0, y0, w, h, scale)
                 sys.stdout.write('\x1b[H\x1b[2J' + '\n'.join(art) + '\n')
             sys.stdout.write(time.strftime('%H:%M:%S') + '  frame %d' % n +
-                             ('  serial console, %d rows  %s' % (dm.rows, dm.ident or '') if dm else '  TinyUSB') +
+                             ('  serial console, %d rows  %s' % (dm.rows, dm.who()) if dm else '  old TinyUSB text frames') +
                              ('   [%s]' % typing.status() if typing else '') + '\n')
             sys.stdout.flush()
             if a.png or a.latest:

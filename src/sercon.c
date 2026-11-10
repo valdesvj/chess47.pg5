@@ -1,5 +1,8 @@
-/* sercon.c - Chess 47 over DMCP5 3.58's own serial console (IFC 3.18): the same interface as src/usb/usbser.c
- * (TinyUSB) and src/usbview.c, so main.c and the game protocol do not change. No TinyUSB.
+/* sercon.c - Chess 47 over DMCP5's serial console, in both builds:
+ *   make                  (USB=sercon)  DMCP5 3.58's own console (IFC 3.18): DMCP runs the USB
+ *   make USB=tinyusb      the same console played by src/usb/usbcon.c over our own TinyUSB port (any DMCP5)
+ * The PC sees the same stream either way, so tools/dm42port.py, lichess_board.py, usb_stockfish.py and dm42view.py
+ * (--keys too) work the same with both.
  *
  *   usbser_start   the console on, and DMCP's LCD stream (the screen: DMCP sends every changed row on channel 0);
  *                  the user's DMCP settings are kept and given back by usbser_stop
@@ -7,8 +10,10 @@
  *                  (the data sheet: longer or quick calls lose their ends); short lines joined up to that
  *   usbser_read    the PC's lines from channel 2 (usb_serial_read_line), as bytes with their '\n'
  *   usbser_idle    sleep with a 100 ms timer while the cable is in: DMCP buffers only 256 bytes / 16 lines a
- *                  channel, and a line from the PC may not wake the calculator
- *   usbview_*      nothing to send: DMCP streams the LCD; key 77 (the PC sent L) -> redraw + lcd_forced_refresh
+ *                  channel, and a line from the PC may not wake the calculator (TinyUSB: no sleep, the CPU runs
+ *                  the USB until a key or the time is up)
+ *   usbview_*      DMCP streams the LCD (TinyUSB: usbcon.c sends the changed rows after each redraw);
+ *                  key 77 (the PC sent L) -> redraw + lcd_forced_refresh
  *
  * The PC adds 0x12 (channel 2) before each line it sends, and reads our lines on channel 2 (tools/dm42port.py).
  * Copyright (C) 2026 Victor Valdes - GPL-3.0-or-later. */
@@ -35,9 +40,15 @@ static void put_back(int op, int v) { if (v == 0 || v == 1) usb_serial_ioctl(op,
 int usbser_start(const char *product) {
   (void)product;
   if (on) return 0;
+#ifdef SERCON_TINYUSB
+  usbcon_ident(product, PROGRAM_VERSION);
+#endif
   was_en = sw(SERIO_IS_ENABLED);
   was_lcd = sw(SERIO_SEND_LCD);
   usb_serial_ioctl(SERIO_IS_ENABLED, 1);
+#ifdef SERCON_TINYUSB
+  if (sw(SERIO_IS_ENABLED) != 1) return usbcon_error() ? usbcon_error() : -2;   /* -1 no USB power, -2 no memory */
+#endif
   usb_serial_ioctl(SERIO_SEND_LCD, 1);
   on = 1; nout = nin = atin = 0;
   for (int i = 0; i < USIN_MAX_READLINES && usb_serial_ioctl(SERIO_LINE_READY, CH) > 0; i++)
@@ -94,7 +105,12 @@ int usbser_write(const void *p, int n) {
 }
 int usbser_puts(const char *s) { return usbser_write(s, (int)strlen(s)); }
 
-void usbser_task(void) { flush(); }
+void usbser_task(void) {
+  flush();
+#ifdef SERCON_TINYUSB
+  usbcon_poll();                                       /* the USB keeps answering the PC during a search */
+#endif
+}
 
 int usbser_read(void *p, int max) {
   flush();
@@ -115,16 +131,33 @@ int usbser_read(void *p, int max) {
 
 void usbser_idle(uint32_t ms) {
   flush();
+#ifdef SERCON_TINYUSB
+  usbcon_idle(ms);                                     /* the CPU runs the USB: no sleep (it would stop the USB) */
+#else
   sys_timer_start(0, usbser_active() && ms > 100 ? 100 : ms);   /* poll the PC's lines every 100 ms */
   CLR_ST(STAT_RUNNING);
   sys_sleep();
+#endif
 }
 
+#ifdef SERCON_TINYUSB
+const char *usbser_product(void) { return "TinyUSB serial console"; }
+#else
 const char *usbser_product(void) { return "DMCP serial console"; }
+#endif
 
-/* the screen: DMCP streams it */
+/* the screen: DMCP streams it at each lcd_refresh(); the TinyUSB build sends the changed rows after each redraw */
 void usbview_on(void) {}
 void usbview_off(void) {}
 int usbview_is_on(void) { return on; }
-void usbview_send(void) {}
-void usbview_redraw_request(void) { lcd_forced_refresh(); }
+void usbview_send(void) {
+#ifdef SERCON_TINYUSB
+  if (on) { usbcon_lcd_refreshed(); usbcon_poll(); }
+#endif
+}
+void usbview_redraw_request(void) {
+  lcd_forced_refresh();
+#ifdef SERCON_TINYUSB
+  usbcon_lcd_refreshed();
+#endif
+}

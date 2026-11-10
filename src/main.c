@@ -1266,7 +1266,7 @@ static void handle_softkey(int k) {
            }
            cfg.usb ^= 1;
            if (cfg.usb) {
-             int r = usbser_start("Chess 47");               /* our own serial port (TinyUSB) */
+             int r = usbser_start("Chess 47");               /* the serial console (DMCP5 3.58 or TinyUSB) */
              if (!r) { usbview_on(); strcpy(status, "USB serial ON"); usb_send("\r\nCHESS47 hello\r\n"); }
              else { cfg.usb = 0; strcpy(status, r == -1 ? "Connect USB first" : "No memory for USB"); }
            } else { usbview_off(); usbser_stop(); strcpy(status, "USB serial OFF"); }

@@ -1,11 +1,12 @@
-/* usbser.c - the DM42n's USB serial port driven by the program (TinyUSB 0.21, DWC2 OTG_FS of the STM32U575).
+/* tport.c - the DM42n's USB serial port driven by the program (TinyUSB 0.21, DWC2 OTG_FS of the STM32U575), for
+ * src/usb/usbcon.c (make USB=tinyusb: DMCP5 3.58's serial console played over our own port).
  *
  * The firmware keeps the USB core but leaves it soft-disconnected; we take it for as long as the port is on:
  *  - the USB supply (PWR SVMCR.USV), the 48 MHz clock (HSI48 trimmed by the CRS on the USB SOF), the core's clock;
  *  - the interrupt: a copy of the vector table in RAM with our handler for OTG_FS (IRQ 73), VTOR pointed at it;
- *    the firmware's own table is put back by usbser_stop();
+ *    the firmware's own table is put back by tport_stop();
  *  - TinyUSB's device stack: one CDC port.
- * While the port is on the CPU must not stop (sys_sleep would stop the USB): usbser_idle() runs the USB instead.
+ * While the port is on the CPU must not stop (sys_sleep would stop the USB): tport_wait() runs the USB instead.
  * Copyright (C) 2026 Victor Valdes - GPL-3.0-or-later. */
 #include <main.h>
 #include <dmcp.h>
@@ -13,7 +14,7 @@
 #include <string.h>
 #include "stm32u5xx.h"
 #include "tusb.h"
-#include "usbser.h"
+#include "tport.h"
 
 #define REG(a) (*(volatile uint32_t *)(a))
 #define RCC          0x46020C00UL
@@ -37,7 +38,7 @@ static void *vt_mem;
 static uint32_t old_vtor;
 static const char *prod = "47 calculator";
 
-const char *usbser_product(void) { return prod; }
+const char *tport_product(void) { return prod; }
 static void otg_irq(void) { tud_int_handler(0); }
 
 static void clocks(void) {
@@ -55,7 +56,7 @@ static void clocks(void) {
   (void)RCC_AHB2ENR1;
 }
 
-int usbser_start(const char *product) {
+int tport_start(const char *product) {
   if (on) return 0;
   if (!usb_powered()) return -1;
   if (product) prod = product;
@@ -78,7 +79,7 @@ int usbser_start(const char *product) {
   return 0;
 }
 
-void usbser_stop(void) {
+void tport_stop(void) {
   if (!on) return;
   tud_disconnect();
   tusb_deinit(0);
@@ -94,47 +95,28 @@ void usbser_stop(void) {
   on = 0;
 }
 
-int usbser_active(void) { return on; }
-int usbser_mounted(void) { return on && tud_mounted(); }
-int usbser_connected(void) { return on && tud_cdc_connected(); }
-void usbser_task(void) { if (on) tud_task(); }
+int tport_mounted(void) { return on && tud_mounted(); }
+int tport_connected(void) { return on && tud_cdc_connected(); }
+void tport_task(void) { if (on) tud_task(); }
 
-int usbser_write(const void *p, int n) {
-  if (!on) return -1;
-  tud_task();
-  if (!tud_cdc_connected()) return -1;
-  const uint8_t *b = (const uint8_t *)p;
-  int sent = 0;
-  uint32_t t = sys_current_ms();
-  while (sent < n) {
-    uint32_t room = tud_cdc_write_available();
-    if (room) {
-      uint32_t k = (uint32_t)(n - sent) < room ? (uint32_t)(n - sent) : room;
-      sent += (int)tud_cdc_write(b + sent, k);
-      t = sys_current_ms();
-    } else {
-      tud_cdc_write_flush();
-      if (sys_current_ms() - t > 300 || !tud_cdc_connected()) return -1;   /* the PC stopped reading */
-    }
-    tud_task();
-  }
-  tud_cdc_write_flush();
-  tud_task();
-  return sent;
+int tport_rx(uint8_t *p, int max) {
+  if (!on || !tud_cdc_available()) return 0;
+  return (int)tud_cdc_read(p, (uint32_t)max);
 }
 
-int usbser_puts(const char *s) { return usbser_write(s, (int)strlen(s)); }
+int tport_tx_room(void) { return on && tud_cdc_connected() ? (int)tud_cdc_write_available() : 0; }
 
-int usbser_read(void *p, int max) {
+int tport_tx(const void *p, int n) {
   if (!on) return 0;
-  tud_task();
-  return tud_cdc_available() ? (int)tud_cdc_read(p, (uint32_t)max) : 0;
+  int k = (int)tud_cdc_write(p, (uint32_t)n);
+  tud_cdc_write_flush();
+  return k;
 }
 
-void usbser_idle(uint32_t ms) {
+void tport_wait(uint32_t ms, void (*poll)(void)) {
   uint32_t t = sys_current_ms(), r = t;
-  while (sys_current_ms() - t < ms && key_empty()) {
-    tud_task();
-    if (sys_current_ms() - r > 10000) { reset_auto_off(); r = sys_current_ms(); }
-  }
+  do {
+    poll();
+    if (sys_current_ms() - r > 10000) { reset_auto_off(); r = sys_current_ms(); }   /* the USB keeps it on */
+  } while (sys_current_ms() - t < ms && key_empty());
 }

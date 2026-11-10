@@ -1,7 +1,7 @@
 /* usb_desc.c - the DM42n's USB identity while a 47 program drives the port: one CDC serial port (/dev/ttyACM0).
  * VID 0xCAFE is TinyUSB's test vendor ID (for personal use). GPL-3.0-or-later. */
 #include "tusb.h"
-#include "usbser.h"
+#include "tport.h"
 
 #define PID 0x4047
 static const tusb_desc_device_t DEV = {
@@ -30,7 +30,7 @@ const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
   switch (index) {
   case 0: str[1] = 0x0409; str[0] = (uint16_t)((TUSB_DESC_STRING << 8) | 4); return str;
   case 1: s = "SwissMicros DM42n"; break;
-  case 2: s = usbser_product(); break;
+  case 2: s = tport_product(); break;
   case 3: s = "47"; break;
   case 4: s = "47 serial"; break;
   default: return NULL;

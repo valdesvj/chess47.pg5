@@ -2,6 +2,9 @@
  * "DMCP5 Serial Console API" (2026-11-06): its section 6 (the three library slots and the ioctl table) and the
  * constants it names. Replace with the official dmcp.h / lft_ifc.h of DMCP5 3.58 when you have them.
  *
+ * make USB=tinyusb (SERCON_TINYUSB): the same three calls are src/usb/usbcon.c's, DMCP's console played over our
+ * own TinyUSB port, so src/sercon.c and the PC tools are the same in both builds.
+ *
  * Only for a .pg5 built with PLATFORM_IFC_VER 18 (make, USB=sercon): on an older DMCP5 these slots hold other
  * functions and calling one crashes the calculator; DMCP5's loader refuses a program with a newer IFC than its own,
  * so a build with IFC 18 does not even load there.
@@ -35,7 +38,14 @@ int  usb_serial_read_line(uint8_t chan_nr, uint8_t *buf, int buflen, uint8_t *is
 void usb_serial_write(uint8_t chan_nr, const char *buf, int len);
 int  usb_serial_ioctl(int op, int val);
 
-#ifndef CHESS47_SIM                     /* the PC simulator links its own (test/sim/sercon_sim.c) */
+#ifdef SERCON_TINYUSB                   /* src/usb/usbcon.c: the console over our own TinyUSB port */
+void usbcon_ident(const char *product, const char *version);   /* the USB name, and the V answer */
+int  usbcon_error(void);              /* after SERIO_IS_ENABLED 1: 0, -1 no USB power, -2 no memory */
+int  usbcon_layout_ok(void);          /* the LCD buffer's layout was learnt (else no LCD rows) */
+void usbcon_poll(void);               /* the USB, the PC's lines, channel 0, the LCD rows: call often */
+void usbcon_lcd_refreshed(void);      /* after each lcd_refresh(): the changed rows go out (DMCP does it itself) */
+void usbcon_idle(uint32_t ms);        /* instead of sys_sleep(): runs the USB until a key, or ms milliseconds */
+#elif !defined(CHESS47_SIM)             /* the PC simulator links its own (test/sim/sercon_sim.c) */
 #include <lft_ifc.h>
 #define usb_serial_read_line (*(typeof(usb_serial_read_line)*)(LIBRARY_FN_BASE+804))
 #define usb_serial_write     (*(typeof(usb_serial_write)*)(LIBRARY_FN_BASE+808))

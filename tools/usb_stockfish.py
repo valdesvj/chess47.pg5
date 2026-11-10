@@ -51,7 +51,7 @@ def main():
     screen = dm42port.Screen(a.screen, a.view) if (a.view or a.screen) else None
     if a.view:                                # the log goes under the screen
         globals()["print"] = lambda *x, **k: screen.log(" ".join(str(v) for v in x))
-    port = dm42port.Port(a.port, screen, print)   # the serial console (channel 2) or TinyUSB; waits for the port
+    port = dm42port.Port(a.port, screen, print)   # the serial console, channel 2 (both builds); waits for the port
     if a.keys and not dm42port.keyboard(port, screen):
         print("--keys: needs the serial port and a terminal")
 

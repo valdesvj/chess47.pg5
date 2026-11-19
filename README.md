@@ -39,7 +39,9 @@ letters.
   legal move loses (stalemate too); repetition is a draw (the real perpetual check / chase rules are not modelled);
   60 moves without a capture a draw.
 - Checked: perft from the start = the published counts (44, 1 920, 79 666, 3 290 240, 133 312 995), and perft and
-  WXF on 120 random positions = Fairy-Stockfish (`make xq-test`, needs `pip install pyffish`).
+  WXF on 120 random positions = Fairy-Stockfish (`make xq-test`, with pyffish: on Arch in a venv,
+  `python -m venv ~/opt/venv-xq && ~/opt/venv-xq/bin/pip install pyffish`, then `make xq-test PYTHON=~/opt/venv-xq/bin/python`;
+  or without Python modules, perft only, against Pikafish: `make xq-test XQ_ENGINE=~/opt/Pikafish/src/pikafish`).
 - Not yet: Xiangqi over USB (Pikafish, Pychess), SAVE / LOAD; the strength not measured (Pikafish matches to come).
 - The pieces are made by `tools/xq_pieces.py` (Pillow, Noto Sans CJK, DejaVu Sans) into `src/xq_pieces.h`.
 

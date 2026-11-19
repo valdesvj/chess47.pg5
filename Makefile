@@ -14,6 +14,7 @@ endif
 
 BUILD_DIR = build
 PYTHON ?= python3
+XQ_ENGINE ?=
 
 ######################################
 # Sources
@@ -94,7 +95,8 @@ $(BUILD_DIR):
 test: test/perft.c src/engine.c src/engine.h
 	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/perft test/perft.c src/engine.c && $(BUILD_DIR)/perft
 
-# Xiangqi: perft from the start (the published counts); with pyffish (pip install pyffish) perft and WXF on 300
+# Xiangqi: perft from the start (the published counts); against Fairy-Stockfish (pyffish: perft and WXF) or a UCI
+# engine (make xq-test XQ_ENGINE=~/opt/Pikafish/src/pikafish: perft) on 120
 # random positions against Fairy-Stockfish; the chess search unchanged by the shared search.inc (test/bench_chess.txt)
 xq-test:
 	mkdir -p $(BUILD_DIR)
@@ -102,7 +104,7 @@ xq-test:
 	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/xq_wxf test/xq_wxf.c src/engine.c src/xq_engine.c
 	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/bench test/bench.c src/engine.c && $(BUILD_DIR)/bench > $(BUILD_DIR)/bench.txt \
 	  && diff $(BUILD_DIR)/bench.txt test/bench_chess.txt && echo "chess search unchanged"
-	$(PYTHON) test/xq_check.py 120
+	XQ_ENGINE=$(XQ_ENGINE) $(PYTHON) test/xq_check.py 120
 .PHONY: xq-test
 
 # both .pg5 at once: build/<NAME>.pg5 (DMCP5 3.58's console) and build/tinyusb/<NAME>.pg5 (any DMCP5)

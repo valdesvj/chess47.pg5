@@ -141,6 +141,18 @@ and varied openings (random start positions for Chess960). Script: `test/run_mat
 The combined line is the maximum-likelihood rating over the three matches (100 games). To repeat:
 `python3 test/match.py --level 9 --nodes 400000 --elo 2400 --games 60`.
 
+**Xiangqi** (not measured yet): `test/xq_match.py` plays the Xiangqi engine (`build/xq-uci`, node budget as the
+DM42n) against Fairy-Stockfish at a fixed `UCI_Elo`, refereed by pyffish (Fairy-Stockfish's rules: perpetual check
+and chasing included), from 12 openings with both colours:
+
+```bash
+gcc -O2 -o build/xq-uci test/xq_uci.c src/engine.c src/xq_engine.c
+python3 test/xq_match.py --fairy ~/opt/Fairy-Stockfish/src/stockfish --nodes 100000 --elo 1600 --games 20
+```
+
+Fairy-Stockfish's `UCI_Elo` is calibrated for chess, so for Xiangqi it is a scale to compare levels, not an
+official rating.
+
 **Roughly 1850 on battery at the middle levels, 2200–2300 on USB power, about 2480 at level 9 on USB power (about 2200 on battery).**
 
 Please read these as rough estimates:

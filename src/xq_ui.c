@@ -249,8 +249,8 @@ static void xq_draw_panel(void) {
   for (int ln = first; ln < total; ln++) {
     sprintf(s, "%d.", ln + 1);
     xptext(2, y, s, 0);
-    xptext(36, y, XG->wxf[2 * ln], 0);
-    if (2 * ln + 1 < XG->n) xptext(108, y, XG->wxf[2 * ln + 1], 0);
+    xptext(46, y, XG->wxf[2 * ln], 0);                 /* room for 3-digit move numbers (Xiangqi games run long) */
+    if (2 * ln + 1 < XG->n) xptext(114, y, XG->wxf[2 * ln + 1], 0);
     y += h;
   }
 }

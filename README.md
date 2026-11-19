@@ -141,6 +141,38 @@ and varied openings (random start positions for Chess960). Script: `test/run_mat
 The combined line is the maximum-likelihood rating over the three matches (100 games). To repeat:
 `python3 test/match.py --level 9 --nodes 400000 --elo 2400 --games 60`.
 
+**Xiangqi** (November 2026): the Xiangqi engine (`build/xq-uci`, the DM42n's node budget) against
+**Fairy-Stockfish** at a fixed `UCI_Elo`, 100 ms a move, refereed by pyffish (Fairy-Stockfish's rules: perpetual
+check and chasing included), 12 openings with both colours. Script: `test/xq_match.py`.
+
+| Imitates on the DM42n | Nodes/move | vs Fairy-Stockfish | Result | Score |
+|---|---:|---:|---|---:|
+| levels 7–8, USB power | 100 000 | 1600 | +19 =0 −1 | 95% |
+| levels 7–8, USB power | 100 000 | 2000 | +10 =2 −8 | 55% |
+| levels 7–8, USB power | 100 000 | 2400 | +0 =0 −20 | 0% |
+| level 9, USB power | 400 000 | 2000 | +9 =3 −8 | 52% |
+| level 9, USB power | 400 000 | 2200 | +1 =0 −19 | 5% |
+| level 9, USB power | 400 000 | 2400 | +3 =0 −37 | 8% |
+
+**About 2000 on Fairy-Stockfish's scale, at 100 000 and at 400 000 nodes alike** (maximum likelihood: 100 000
+nodes ~2000, 95% 1880–2120; 400 000 nodes ~1940, 95% 1830–2040). Read it with care:
+* Fairy-Stockfish's `UCI_Elo` is calibrated for chess. In Xiangqi its scale is far steeper: even at 2000, nearly
+  hopeless at 2200. So these are not official Xiangqi ratings, only a place on Fairy-Stockfish's ladder.
+* Four times the nodes gained nothing here (in chess about 250 points): the search is not the limit, the simple
+  evaluation is (material, a few square bonuses, the guards). Mobility, attacks on the general and the
+  cannon/horse coordination are where Xiangqi would get stronger.
+* In words: a good club player, as in chess.
+
+To repeat:
+
+```bash
+gcc -O2 -o build/xq-uci test/xq_uci.c src/engine.c src/xq_engine.c
+python3 test/xq_match.py --fairy ~/opt/Fairy-Stockfish/src/stockfish --nodes 400000 --elo 2000 --games 20
+```
+
+Needs pyffish (`python -m venv ~/opt/venv-xq && ~/opt/venv-xq/bin/pip install ~/opt/Fairy-Stockfish`) and
+Fairy-Stockfish built with `largeboards=yes`.
+
 **Roughly 1850 on battery at the middle levels, 2200–2300 on USB power, about 2480 at level 9 on USB power (about 2200 on battery).**
 
 Please read these as rough estimates:

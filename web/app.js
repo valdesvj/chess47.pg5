@@ -916,8 +916,8 @@ function xq_draw_panel() {
   const bottom = cfg.zoom ? LCD_Y - 2 : MENU_Y - 2, lines = Math.max(1, Math.floor((bottom - y) / h));
   const total = (XG.n + 1) >> 1, first = Math.max(0, total - lines);
   for (let ln = first; ln < total; ln++) {
-    ptext(2, y, (ln + 1) + '.', 0); ptext(40, y, XG.wxf[2 * ln], 0);
-    if (2 * ln + 1 < XG.n) ptext(112, y, XG.wxf[2 * ln + 1], 0);
+    ptext(2, y, (ln + 1) + '.', 0); ptext(46, y, XG.wxf[2 * ln], 0);
+    if (2 * ln + 1 < XG.n) ptext(114, y, XG.wxf[2 * ln + 1], 0);
     y += h;
   }
 }

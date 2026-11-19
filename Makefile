@@ -134,6 +134,6 @@ SIM_USB = $(if $(filter sercon,$(USB)),src/sercon.c test/sim/sercon_sim.c,\
 SIM_DEFS = $(if $(filter sercon,$(USB)),,-DSERCON_TINYUSB)
 sim:
 	mkdir -p $(BUILD_DIR)
-	gcc -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' -DCHESS47_SIM $(SIM_DEFS) \
+	gcc -std=gnu11 -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' -DCHESS47_SIM $(SIM_DEFS) \
 	    -Itest/sim -Isrc -Isrc/usb -o $(BUILD_DIR)/sim test/sim/sim.c src/main.c src/engine.c src/xq_engine.c $(SIM_USB)
 .PHONY: sim

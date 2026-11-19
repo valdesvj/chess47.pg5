@@ -324,7 +324,8 @@ void xq_move_to_wxf(const Pos *p, Move m, char *s) {
     other = 1;
     if (c == XRED ? r > rf : r < rf) front = 1;     /* another one ahead: this is the rear one */
   }
-  if (other) *s++ = front ? '-' : '+'; else s = put_int(s, fnum);
+  /* two on the file: front / rear, but not the advisors and elephants (their diagonal move tells them apart) */
+  if (other && ty != XADVISOR && ty != XELEPHANT) *s++ = front ? '-' : '+'; else s = put_int(s, fnum);
   int fwd = c == XRED ? rt - rf : rf - rt;
   *s++ = fwd > 0 ? '+' : fwd < 0 ? '-' : '=';
   if (ty == XADVISOR || ty == XELEPHANT || ty == XHORSE || fwd == 0) s = put_int(s, tnum);

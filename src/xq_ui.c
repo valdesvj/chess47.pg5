@@ -123,11 +123,14 @@ static void xq_frame(int cx, int cy, int r, int w) {    /* a square frame round 
   lcd_fill_rect(cx + r - w + 1, cy - r, w, 2 * r + 1, 1);
 }
 
-static void xq_corners(int cx, int cy, int r) {         /* the last move, a hint: four corners */
+/* four corners at r from a point, each len long and w thick: they stay in the gap between the pieces (a disc ends
+   11 from its point, the next disc starts 13 away), so nothing next to it is drawn over */
+static void xq_corners(int cx, int cy, int r, int len, int w) {
   for (int sx = -1; sx <= 1; sx += 2)
     for (int sy = -1; sy <= 1; sy += 2) {
-      lcd_fill_rect(sx < 0 ? cx - r : cx + r - 3, cy + sy * r, 4, 1, 1);
-      lcd_fill_rect(cx + sx * r, sy < 0 ? cy - r : cy + r - 3, 1, 4, 1);
+      int x = sx < 0 ? cx - r : cx + r - w + 1, y = sy < 0 ? cy - r : cy + r - w + 1;
+      lcd_fill_rect(sx < 0 ? x : cx + r - len + 1, y, len, w, 1);      /* along x */
+      lcd_fill_rect(x, sy < 0 ? y : cy + r - len + 1, w, len, 1);      /* along y */
     }
 }
 
@@ -142,8 +145,8 @@ static void xq_draw_board(void) {
         if (pc) xq_frame(cx, cy, 12, 1);
         else lcd_fill_rect(cx - 2, cy - 2, 5, 5, 1);
       }
-      if (s == xlast_from || s == xlast_to || s == xhint_from || s == xhint_to) xq_corners(cx, cy, 12);
-      if (s == xcur && !thinking) xq_frame(cx, cy, 13, 2);
+      if (s == xlast_from || s == xlast_to || s == xhint_from || s == xhint_to) xq_corners(cx, cy, 12, 4, 1);
+      if (s == xcur && !thinking) xq_corners(cx, cy, 12, 7, 2);   /* the cursor: thick corners, inside the gap */
     }
 }
 

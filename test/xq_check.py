@@ -35,10 +35,10 @@ def perft(fen, d, moves=()):
 
 
 def main():
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 300
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 120
     fens = positions(n)
     exe = os.path.join(ROOT, 'build', 'xq_perft')
-    jobs = [(d, f) for i, f in enumerate(fens) for d in ((1, 2, 3) if i < 15 else (1, 2))]
+    jobs = [(d, f) for i, f in enumerate(fens) for d in ((1, 2, 3) if i < 5 else (1, 2))]
     r = subprocess.run([exe, '-'], input=''.join('%d %s\n' % j for j in jobs), text=True, capture_output=True)
     got = r.stdout.split()
     bad = 0

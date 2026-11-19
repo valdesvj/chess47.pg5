@@ -25,6 +25,24 @@ To return to Free42: in Chess 47 press **SHIFT 0 (SETUP) → System**, or use
 > DMCP5 holds one program at a time, so loading Chess 47 replaces Free42 until you
 > load the DM42 program again. Your state files on the disk are not touched.
 
+## Xiangqi (Chinese chess), experimental
+
+**SHIFT F1** switches between chess and Xiangqi (the chess game stays as it was). The same search as chess (the
+shared `src/search.inc`), the same levels, clock and modes (you vs CPU, 2 players, CPU vs CPU); moves in WXF
+notation (C2=5, H8+7). **×** changes the pieces: the traditional characters (Red 帥仕相傌俥炮兵, Black
+將士象馬車砲卒, from Noto Sans CJK), symbols, or the WXF letters K A E H R C P. In chess, **×** shows the pieces as
+letters.
+
+![Xiangqi](docs/xiangqi_characters.png) ![symbols](docs/xiangqi_symbols.png)
+
+- The rules: palace, river, the horse's leg and the elephant's eye, the cannon's screen, the facing generals; no
+  legal move loses (stalemate too); repetition is a draw (the real perpetual check / chase rules are not modelled);
+  60 moves without a capture a draw.
+- Checked: perft from the start = the published counts (44, 1 920, 79 666, 3 290 240, 133 312 995), and perft and
+  WXF on 120 random positions = Fairy-Stockfish (`make xq-test`, needs `pip install pyffish`).
+- Not yet: Xiangqi over USB (Pikafish, Pychess), SAVE / LOAD; the strength not measured (Pikafish matches to come).
+- The pieces are made by `tools/xq_pieces.py` (Pillow, Noto Sans CJK, DejaVu Sans) into `src/xq_pieces.h`.
+
 ## Keys
 
 | Key | Action |

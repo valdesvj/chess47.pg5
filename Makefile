@@ -102,7 +102,7 @@ xq-test:
 	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/xq_wxf test/xq_wxf.c src/engine.c src/xq_engine.c
 	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/bench test/bench.c src/engine.c && $(BUILD_DIR)/bench > $(BUILD_DIR)/bench.txt \
 	  && diff $(BUILD_DIR)/bench.txt test/bench_chess.txt && echo "chess search unchanged"
-	$(PYTHON) test/xq_check.py 100
+	$(PYTHON) test/xq_check.py 120
 .PHONY: xq-test
 
 # both .pg5 at once: build/<NAME>.pg5 (DMCP5 3.58's console) and build/tinyusb/<NAME>.pg5 (any DMCP5)

@@ -9,14 +9,8 @@
 #ifndef CHESS47_ENGINE_H
 #define CHESS47_ENGINE_H
 
-#include <stdint.h>
-#include <stddef.h>
+#include "engine_common.h"
 
-#define MAXPLY    64
-#define MAXMOVES  256
-#define MAXGAME   400   /* plies kept in a game history */
-
-typedef uint32_t Move;
 #define MV(f,t,pr,fl) ((Move)(f) | ((Move)(t)<<8) | ((Move)(pr)<<16) | ((Move)(fl)<<24))
 #define MFROM(m)  ((int)((m)&0x7f))
 #define MTO(m)    ((int)(((m)>>8)&0x7f))
@@ -40,10 +34,6 @@ enum { EMPTY = 0, PAWN = 1, KNIGHT, BISHOP, ROOK, QUEEN, KING };
 #define RANK_OF(s) ((s)>>4)
 #define NOSQ       0x7f
 #define ONBOARD(s) (!((s)&0x88))
-
-#define INF   32000
-#define MATE  31000
-#define IS_MATE(s) ((s) > MATE-MAXPLY*2 || (s) < -MATE+MAXPLY*2)
 
 typedef struct {
   uint8_t  b[128];
@@ -86,25 +76,9 @@ uint64_t perft(const Pos *p, int depth);
 int  game_state(const Pos *p, const uint64_t *keys, int nkeys);
 
 /* Search */
-typedef struct {
-  int      depth;                 /* max depth (1..MAXPLY-4) */
-  uint32_t time_ms;               /* soft time limit, 0 = none */
-  int      noise;                 /* centipawns of root randomness (weak levels) */
-  uint32_t seed;
-  uint32_t max_nodes;             /* 0 = unlimited (used to emulate the DM42n speed on a PC) */
-  uint32_t (*now)(void);          /* milliseconds clock */
-  int      (*poll)(void);         /* return 1 to stop the search now */
-  void     (*info)(int depth, int score, uint32_t nodes, Move best);
-} Limits;
-
-typedef struct {
-  Move     best;
-  int      score;
-  int      depth;
-  uint32_t nodes;
-} Result;
-
 Result search(const Pos *root, const uint64_t *keys, int nkeys, const Limits *lim);
 int  evaluate(const Pos *p);
+
+
 
 #endif

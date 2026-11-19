@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chess 47 web</title>
-<meta name="description" content="Chess 47, the SwissMicros DM42n chess program, in the browser: the same engine, screen and keys.">
+<title>Chess 47 web: chess and Xiangqi</title>
+<meta name="description" content="Chess 47, the SwissMicros DM42n chess and Xiangqi program, in the browser: the same engines, screen and keys.">
 <style>
   :root { --bg: #e9ebe4; --fg: #22261e; --muted: #5d6356; --body: #3a3d36; --key: #2b2e29; --lcd: #c7cdba; --accent: #8a6d1f; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #16171a; --fg: #e4e6df; --muted: #9aa092; --body: #2a2c30; --key: #101113; --accent: #d1b05a; } }
@@ -19,6 +19,7 @@
   .brand { color: #f2f2ee; font: 600 15px system-ui, sans-serif; letter-spacing: .04em; margin: 0 0 8px 4px; }
   canvas { display: block; width: 100%; height: auto; border-radius: 4px; background: var(--lcd); touch-action: manipulation; cursor: pointer; }
   .opts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+  .opts button { font: 600 13px system-ui, sans-serif; padding: 3px 12px; border-radius: 6px; border: none; background: #e8a33a; color: #1d1d1b; cursor: pointer; }
   .opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
   details { margin-top: 18px; }
   summary { cursor: pointer; font-weight: 600; }
@@ -36,19 +37,23 @@
 </head>
 <body>
 <main>
-  <header><h1>Chess 47 web</h1><span>the DM42n program, its engine line for line in JavaScript</span></header>
+  <header><h1>Chess 47 web</h1><span>chess and Xiangqi 象棋: the DM42n program, its engines line for line in JavaScript</span></header>
   <div class="calc">
     <p class="brand">SwissMicros</p>
     <canvas id="lcd" width="1200" height="720" aria-label="Chess 47 screen"></canvas>
   </div>
   <div class="opts">
+    <button id="shift" type="button" title="the game menu: XIANGQI / CHESS, PIECES, ZOOM, RESIGN, DRAW (or press Shift alone)">SHIFT</button>
     <label><input type="checkbox" id="calc" checked> DM42n speed (the calculator's strength; off: this computer's full speed)</label>
     <label><input type="checkbox" id="sound" checked> Sound</label>
   </div>
   <details>
     <summary>Keys</summary>
     <table>
+      <tr><td>SHIFT</td><td>the game menu on the soft keys (Shift pressed alone, or the SHIFT button): F1 XIANGQI / CHESS (each game is kept), F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW</td></tr>
       <tr><td>click / tap</td><td>pick a piece, then its square (castling: the king, then its rook)</td></tr>
+      <tr><td>* or x</td><td>the pieces: chess figures / letters; Xiangqi characters / symbols / letters</td></tr>
+      <tr><td>+ or -</td><td>zoom: the board the full height, no soft keys (they still work)</td></tr>
       <tr><td>F1 … F6</td><td>the soft keys under the screen (or click them); &gt;&gt; the next page</td></tr>
       <tr><td>8 2 4 6, arrows</td><td>the cursor; 7 9 1 3 diagonally</td></tr>
       <tr><td>5, Enter</td><td>pick / play at the cursor</td></tr>
@@ -59,6 +64,9 @@
         NEW in an unfinished game against the computer counts as resigning (NEW twice; NEW again for the next game)</td></tr>
       <tr><td>i</td><td>info: the engine's last search</td></tr>
     </table>
+    <p><strong>Xiangqi</strong> (Chinese chess, SHIFT F1): the same levels, clock and modes; moves in WXF notation
+    (C2=5, H8+7). Soft keys: NEW LEVEL FLIP UNDO HINT / PIECES CLOCK SIDE RESIGN DRAW / CHESS MODE FEN. No legal move
+    loses (stalemate too); repetition is a draw; 60 moves without a capture a draw. And SHIFT 7 (七, seven)…</p>
     <p>Levels CRAZY, 1-9 as on the calculator. With <em>DM42n speed</em> the engine searches as many positions as the
     DM42n on USB power would in the same time (about 19 000 a second), so the levels keep the calculator's strength
     (level 9 about 2480 against Stockfish). The game is kept in this browser and resumed.</p>
@@ -829,22 +837,597 @@ Object.assign(E, {
 G.Chess47 = E;
 if (typeof module !== 'undefined') module.exports = E;
 })(typeof self !== 'undefined' ? self : globalThis);
+
+/*
+ * CHESS47 web - the Xiangqi engine of src/xq_engine.c (and its search, src/search.inc) in JavaScript, line for line
+ * (C) 2026 Victor Valdes - GPL-3.0-or-later
+ *
+ * A 16 x 14 board (9 files x 10 ranks inside, padded), copy-make, the same PVS alpha-beta as chess with a
+ * transposition table, null move, LMR and quiescence. The 64-bit Zobrist keys are two 32-bit halves (hi, lo), made
+ * by the same xorshift64 as the C, so the keys, the node counts and the moves are the C engine's
+ * (test/test_web_xq.js checks perft and fixed-depth searches against test/xq_jscheck.c).
+ */
+'use strict';
+(function (G) {
+const MAXPLY = 64, MAXMOVES = 256, MAXGAME = 400;
+const INF = 32000, MATE = 31000;
+const IS_MATE = s => s > MATE - MAXPLY * 2 || s < -MATE + MAXPLY * 2;
+const XF_CAP = 1;
+const XMV = (f, t, fl) => (f | (t << 8) | (fl << 24)) >>> 0;
+const XFROM = m => m & 0xff, XTO = m => (m >>> 8) & 0xff, XFLAGS = m => m >>> 24;
+const XEMPTY = 0, XKING = 1, XADVISOR = 2, XELEPHANT = 3, XHORSE = 4, XCHARIOT = 5, XCANNON = 6, XPAWN = 7;
+const XRED = 0, XBLACK = 1, XOFF = 0x80;
+const XTYPE = p => p & 7, XCOLOR = p => (p >> 3) & 1;
+const XSQ = (f, r) => ((r + 2) << 4) | (f + 3), XFILE = s => (s & 15) - 3, XRANK = s => (s >> 4) - 2;
+
+const X = {};
+
+/* ---- positions: b[256], side, half, fullmove, k0 k1 (the generals), hi lo (the key) ---- */
+function newPos() { return { b: new Uint8Array(256), side: 0, half: 0, fullmove: 1, k0: 0, k1: 0, hi: 0, lo: 0 }; }
+function copyPos(d, s) {
+  d.b.set(s.b); d.side = s.side; d.half = s.half; d.fullmove = s.fullmove; d.k0 = s.k0; d.k1 = s.k1;
+  d.hi = s.hi; d.lo = s.lo; return d;
+}
+const ksq = (p, c) => c ? p.k1 : p.k0;
+function setK(p, c, s) { if (c) p.k1 = s; else p.k0 = s; }
+
+let tt_n = 1 << 20;                                    /* entries: the C's with eng_init's 16 MB (16-byte entries) */
+let ttH, ttL, ttM, ttS, ttD, ttF;
+const TT_LOWER = 1, TT_UPPER = 2, TT_EXACT = 3;
+
+const MBUF = MAXPLY * 96;
+const stk = []; for (let i = 0; i < MAXPLY + 2; i++) stk.push(newPos());
+const mbuf = new Uint32Array(MBUF), sbuf = new Int32Array(MBUF);
+const mofs = new Uint16Array(MAXPLY + 2);
+const killer = new Uint32Array(MAXPLY * 2);
+const hh = new Int16Array(16 * 256);
+const repH = new Int32Array(MAXGAME + MAXPLY + 8), repL = new Int32Array(MAXGAME + MAXPLY + 8);
+let rep_n = 0;
+const scratch = new Uint32Array(MAXMOVES);
+const zpH = new Int32Array(14 * 90), zpL = new Int32Array(14 * 90);
+let zsH = 0, zsL = 0;
+
+const ORTH = [1, -1, 16, -16];
+const DIAG = [17, 15, -15, -17];
+const HD = [33, 31, -31, -33, 18, 14, -14, -18];           /* horse: target */
+const HL = [16, 16, -16, -16, 1, -1, 1, -1];              /* its leg */
+
+const ZI = (pc, s) => ((XTYPE(pc) - 1) + 7 * XCOLOR(pc)) * 90 + XRANK(s) * 9 + XFILE(s);
+
+function in_palace(c, s) {
+  const f = XFILE(s), r = XRANK(s);
+  return f >= 3 && f <= 5 && (c === XRED ? r >= 0 && r <= 2 : r >= 7 && r <= 9);
+}
+function own_half(c, s) { const r = XRANK(s); return c === XRED ? r <= 4 : r >= 5; }
+
+/* ---- init: the C's xorshift64 from 0x2545F4914F6CDD1D ---- */
+let zinit = 0;
+function xq_init(entries) {
+  if (entries) tt_n = entries;
+  ttH = new Int32Array(tt_n); ttL = new Int32Array(tt_n); ttM = new Uint32Array(tt_n);
+  ttS = new Int16Array(tt_n); ttD = new Int8Array(tt_n); ttF = new Uint8Array(tt_n);
+  if (!zinit) {
+    let rs = 0x2545F4914F6CDD1Dn;
+    const M = (1n << 64n) - 1n;
+    const next = () => { let x = rs; x ^= (x << 13n) & M; x ^= x >> 7n; x ^= (x << 17n) & M; rs = x; return x; };
+    for (let i = 0; i < 14 * 90; i++) { const x = next(); zpH[i] = Number(x >> 32n) | 0; zpL[i] = Number(x & 0xffffffffn) | 0; }
+    const z = next(); zsH = Number(z >> 32n) | 0; zsL = Number(z & 0xffffffffn) | 0;
+    zinit = 1;
+  }
+  xq_clear_tt();
+  hh.fill(0);
+}
+/* as the C's eng_clear_tt(): the table and the killers; Xiangqi's history stays (xq_init clears it) */
+function xq_clear_tt() { ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); killer.fill(0); }
+
+function compute_key(p) {
+  let h = p.side ? zsH : 0, l = p.side ? zsL : 0;
+  for (let r = 0; r < 10; r++)
+    for (let f = 0; f < 9; f++) { const s = XSQ(f, r); if (p.b[s]) { const i = ZI(p.b[s], s); h ^= zpH[i]; l ^= zpL[i]; } }
+  p.hi = h; p.lo = l;
+}
+
+/* ---- FEN ---- */
+const LET = ' KABNRCP';
+function piece_of(ch) {
+  const black = ch >= 'a' && ch <= 'z';
+  const u = ch.toUpperCase();
+  const t = u === 'K' ? XKING : u === 'A' ? XADVISOR : (u === 'B' || u === 'E') ? XELEPHANT :
+            (u === 'N' || u === 'H') ? XHORSE : u === 'R' ? XCHARIOT : u === 'C' ? XCANNON : u === 'P' ? XPAWN : 0;
+  return t ? t | (black ? 8 : 0) : 0;
+}
+
+function xq_from_fen(p, fen) {
+  p.b.fill(XOFF);
+  for (let r = 0; r < 10; r++) for (let c = 0; c < 9; c++) p.b[XSQ(c, r)] = 0;
+  p.k0 = p.k1 = 0;
+  const parts = fen.trim().split(/\s+/);
+  let r = 9, c = 0;
+  for (const ch of parts[0]) {
+    if (ch === '/') { r--; c = 0; continue; }
+    if (ch >= '1' && ch <= '9') { c += +ch; continue; }
+    const pc = piece_of(ch);
+    if (!pc || r < 0 || c > 8) return 0;
+    p.b[XSQ(c, r)] = pc;
+    if (XTYPE(pc) === XKING) setK(p, XCOLOR(pc), XSQ(c, r));
+    c++;
+  }
+  if (!p.k0 || !p.k1) return 0;
+  p.side = parts[1] === 'b' ? XBLACK : XRED;
+  p.half = 0; p.fullmove = 1;
+  if (parts.length > 4 && /^\d+$/.test(parts[4])) p.half = Math.min(255, +parts[4]);
+  if (parts.length > 5 && /^\d+$/.test(parts[5])) p.fullmove = +parts[5];
+  compute_key(p);
+  return 1;
+}
+
+function xq_to_fen(p) {
+  let o = '';
+  for (let r = 9; r >= 0; r--) {
+    let e = 0;
+    for (let c = 0; c < 9; c++) {
+      const pc = p.b[XSQ(c, r)];
+      if (!pc) { e++; continue; }
+      if (e) { o += e; e = 0; }
+      const ch = LET[XTYPE(pc)];
+      o += XCOLOR(pc) ? ch.toLowerCase() : ch;
+    }
+    if (e) o += e;
+    if (r) o += '/';
+  }
+  return o + ' ' + (p.side ? 'b' : 'w') + ' - - ' + p.half + ' ' + p.fullmove;
+}
+
+function xq_pos_start(p) { xq_from_fen(p, 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1'); }
+
+/* ---- attacks and moves ---- */
+function xq_attacked(p, sq, by) {
+  const b = p.b;
+  for (let k = 0; k < 4; k++) {
+    const d = ORTH[k];
+    let t = sq + d;
+    while (!b[t]) t += d;
+    if (b[t] === XOFF) continue;
+    const q = b[t];
+    if (XCOLOR(q) === by && (XTYPE(q) === XCHARIOT || (XTYPE(q) === XKING && (d === 16 || d === -16)))) return 1;
+    t += d;
+    while (!b[t]) t += d;
+    if (b[t] !== XOFF && b[t] === (XCANNON | by << 3)) return 1;
+  }
+  const hz = XHORSE | by << 3;
+  for (let k = 0; k < 8; k++) {
+    const h = sq - HD[k];
+    if (b[h] === hz && !b[h + HL[k]]) return 1;
+  }
+  const pz = XPAWN | by << 3, fw = by === XRED ? 16 : -16;
+  if (b[sq - fw] === pz) return 1;
+  if (b[sq - 1] === pz && !own_half(by, sq - 1)) return 1;
+  if (b[sq + 1] === pz && !own_half(by, sq + 1)) return 1;
+  return 0;
+}
+const xq_in_check = p => xq_attacked(p, ksq(p, p.side), p.side ^ 1);
+
+/* ml: a Uint32Array, from index base; returns the count */
+function xq_gen_moves(p, ml, caps_only, base) {
+  const b = p.b, c = p.side;
+  base = base || 0;
+  let n = base;
+  const add = (f, t) => {
+    const q = b[t];
+    if (q === XOFF) return;
+    if (q) { if (XCOLOR(q) !== c) ml[n++] = XMV(f, t, XF_CAP); }
+    else if (!caps_only) ml[n++] = XMV(f, t, 0);
+  };
+  for (let r = 0; r < 10; r++)
+    for (let fl = 0; fl < 9; fl++) {
+      const s = XSQ(fl, r), pc = b[s];
+      if (!pc || XCOLOR(pc) !== c) continue;
+      switch (XTYPE(pc)) {
+      case XKING:
+        for (let k = 0; k < 4; k++) if (in_palace(c, s + ORTH[k])) add(s, s + ORTH[k]);
+        break;
+      case XADVISOR:
+        for (let k = 0; k < 4; k++) if (in_palace(c, s + DIAG[k])) add(s, s + DIAG[k]);
+        break;
+      case XELEPHANT:
+        for (let k = 0; k < 4; k++) {
+          const t = s + 2 * DIAG[k];
+          if (b[t] !== XOFF && own_half(c, t) && !b[s + DIAG[k]]) add(s, t);
+        }
+        break;
+      case XHORSE:
+        for (let k = 0; k < 8; k++) if (!b[s + HL[k]]) add(s, s + HD[k]);
+        break;
+      case XCHARIOT:
+        for (let k = 0; k < 4; k++) {
+          const d = ORTH[k];
+          let t = s + d;
+          while (!b[t]) { if (!caps_only) ml[n++] = XMV(s, t, 0); t += d; }
+          if (b[t] !== XOFF && XCOLOR(b[t]) !== c) ml[n++] = XMV(s, t, XF_CAP);
+        }
+        break;
+      case XCANNON:
+        for (let k = 0; k < 4; k++) {
+          const d = ORTH[k];
+          let t = s + d;
+          while (!b[t]) { if (!caps_only) ml[n++] = XMV(s, t, 0); t += d; }
+          if (b[t] === XOFF) continue;
+          t += d;
+          while (!b[t]) t += d;
+          if (b[t] !== XOFF && XCOLOR(b[t]) !== c) ml[n++] = XMV(s, t, XF_CAP);
+        }
+        break;
+      case XPAWN:
+        add(s, s + (c === XRED ? 16 : -16));
+        if (!own_half(c, s)) { add(s, s + 1); add(s, s - 1); }
+        break;
+      }
+    }
+  return n - base;
+}
+
+function xq_make_move(p, n, m) {
+  copyPos(n, p);
+  const f = XFROM(m), t = XTO(m), pc = n.b[f], cap = n.b[t];
+  let i = ZI(pc, f), j = ZI(pc, t);
+  n.hi ^= zpH[i] ^ zpH[j] ^ zsH; n.lo ^= zpL[i] ^ zpL[j] ^ zsL;
+  if (cap) { i = ZI(cap, t); n.hi ^= zpH[i]; n.lo ^= zpL[i]; }
+  n.b[t] = pc;
+  n.b[f] = 0;
+  if (XTYPE(pc) === XKING) setK(n, p.side, t);
+  n.half = cap ? 0 : n.half < 255 ? n.half + 1 : 255;
+  if (p.side === XBLACK) n.fullmove++;
+  n.side ^= 1;
+  return !xq_attacked(n, ksq(n, p.side), n.side);
+}
+
+const lq = newPos();
+function xq_gen_legal(p, ml) {
+  const tmp = new Uint32Array(MAXMOVES);
+  const n = xq_gen_moves(p, tmp, 0, 0);
+  let k = 0;
+  for (let i = 0; i < n; i++) if (xq_make_move(p, lq, tmp[i])) ml[k++] = tmp[i];
+  return k;
+}
+
+function xq_perft(p, depth) {
+  const ml = new Uint32Array(MAXMOVES), c = newPos();
+  const n = xq_gen_moves(p, ml, 0, 0);
+  let t = 0;
+  for (let i = 0; i < n; i++) {
+    if (!xq_make_move(p, c, ml[i])) continue;
+    t += depth > 1 ? xq_perft(c, depth - 1) : 1;
+  }
+  return t;
+}
+
+/* ---- notation ---- */
+function xq_move_to_str(m, rank0) {
+  const f = XFROM(m), t = XTO(m), add1 = rank0 ? 0 : 1;
+  return String.fromCharCode(97 + XFILE(f)) + (XRANK(f) + add1) + String.fromCharCode(97 + XFILE(t)) + (XRANK(t) + add1);
+}
+
+function parse_with(p, s, add1) {
+  const mm = /^([a-i])(\d+)([a-i])(\d+)/.exec(s);
+  if (!mm) return 0;
+  const r0 = +mm[2] - add1, r1 = +mm[4] - add1;
+  if (r0 < 0 || r0 > 9 || r1 < 0 || r1 > 9) return 0;
+  const a = XSQ(mm[1].charCodeAt(0) - 97, r0), b = XSQ(mm[3].charCodeAt(0) - 97, r1);
+  const ml = new Uint32Array(MAXMOVES);
+  const n = xq_gen_legal(p, ml);
+  for (let i = 0; i < n; i++) if (XFROM(ml[i]) === a && XTO(ml[i]) === b) return ml[i];
+  return 0;
+}
+function xq_str_to_move(p, s) { return parse_with(p, s, 0) || parse_with(p, s, 1); }
+
+function xq_move_to_wxf(p, m) {
+  const W = ' KAEHRCP';
+  const f = XFROM(m), t = XTO(m), pc = p.b[f], c = XCOLOR(pc), ty = XTYPE(pc);
+  const ff = XFILE(f), rf = XRANK(f), ft = XFILE(t), rt = XRANK(t);
+  const fnum = c === XRED ? 9 - ff : ff + 1, tnum = c === XRED ? 9 - ft : ft + 1;
+  let s = W[ty];
+  let front = 0, other = 0;
+  for (let r = 0; r < 10; r++) {
+    if (r === rf || p.b[XSQ(ff, r)] !== pc) continue;
+    other = 1;
+    if (c === XRED ? r > rf : r < rf) front = 1;
+  }
+  if (other && ty !== XADVISOR && ty !== XELEPHANT) s += front ? '-' : '+'; else s += fnum;
+  const fwd = c === XRED ? rt - rf : rf - rt;
+  s += fwd > 0 ? '+' : fwd < 0 ? '-' : '=';
+  if (ty === XADVISOR || ty === XELEPHANT || ty === XHORSE || fwd === 0) s += tnum;
+  else s += fwd > 0 ? fwd : -fwd;
+  return s;
+}
+
+/* ---- game state, evaluation ---- */
+/* keys: [hi, lo] pairs of the game so far, the current position last */
+function xq_game_state(p, keys) {
+  const ml = new Uint32Array(MAXMOVES);
+  if (!xq_gen_legal(p, ml)) return xq_in_check(p) ? 1 : 2;
+  if (p.half >= 120) return 3;
+  let att = 0;
+  for (let r = 0; r < 10 && !att; r++)
+    for (let f = 0; f < 9; f++) {
+      const ty = XTYPE(p.b[XSQ(f, r)]);
+      if (ty === XHORSE || ty === XCHARIOT || ty === XCANNON || ty === XPAWN) { att = 1; break; }
+    }
+  if (!att) return 4;
+  let same = 0;
+  for (let i = keys.length - 1, k = 0; i >= 0 && k <= p.half; i--, k++) if (keys[i][0] === p.hi && keys[i][1] === p.lo) same++;
+  return same >= 3 ? 5 : 0;
+}
+
+const XVAL = [0, 0, 200, 200, 400, 900, 450, 100];
+function pst(ty, rr, f) {
+  const cen = 4 - (f > 4 ? f - 4 : 4 - f);
+  switch (ty) {
+  case XPAWN:
+    if (rr <= 4) return rr === 4 ? 10 : 0;
+    return 90 + (rr <= 7 ? 10 * cen : rr === 8 ? 5 * cen : 0) + (rr === 6 || rr === 7 ? 20 : 0);
+  case XHORSE:   return 8 * cen + (rr >= 3 && rr <= 7 ? 15 : 0) - (rr === 0 ? 15 : 0);
+  case XCANNON:  return (f === 4 ? 15 : 0) + (rr === 2 || rr === 7 ? 5 : 0);
+  case XCHARIOT: return (rr >= 5 ? 10 : 0) + 2 * cen;
+  case XKING:    return f === 4 ? 10 : 0;
+  default:       return 0;
+  }
+}
+function xq_evaluate(p) {
+  const sc = [0, 0], guard = [0, 0];
+  for (let r = 0; r < 10; r++)
+    for (let f = 0; f < 9; f++) {
+      const pc = p.b[XSQ(f, r)];
+      if (!pc) continue;
+      const c = XCOLOR(pc), ty = XTYPE(pc), rr = c === XRED ? r : 9 - r;
+      sc[c] += XVAL[ty] + pst(ty, rr, f);
+      if (ty === XADVISOR || ty === XELEPHANT) guard[c]++;
+    }
+  sc[0] -= (4 - guard[0]) * 15;
+  sc[1] -= (4 - guard[1]) * 15;
+  const v = sc[0] - sc[1];
+  return (p.side === XRED ? v : -v) + 10;
+}
+
+/* ---- the search: src/search.inc with Xiangqi's hooks ---- */
+const ORDV = [0, 9, 2, 2, 4, 6, 5, 1];
+let nodes = 0, stop = 0, t0 = 0, L = null, root_best = 0, root_score = 0;
+
+function check_stop() {
+  if (L.max_nodes && nodes >= L.max_nodes) { stop = 1; return; }
+  if (L.poll && L.poll()) { stop = 1; return; }
+  if (L.time_ms && L.now && (L.now() - t0) >= L.time_ms) stop = 1;
+}
+function is_rep(p) {
+  for (let i = rep_n - 3, k = 2; i >= 0 && k <= p.half; i -= 2, k += 2) if (repH[i] === p.hi && repL[i] === p.lo) return 1;
+  return 0;
+}
+const score_to_tt = (s, ply) => s > MATE - 2 * MAXPLY ? s + ply : s < -MATE + 2 * MAXPLY ? s - ply : s;
+const score_from_tt = (s, ply) => s > MATE - 2 * MAXPLY ? s - ply : s < -MATE + 2 * MAXPLY ? s + ply : s;
+const HIDX = (p, m) => (p.b[XFROM(m)] << 8) | XTO(m);
+
+function order(p, o, n, ttm, ply) {
+  for (let i = o; i < o + n; i++) {
+    const m = mbuf[i];
+    let v;
+    if (m === ttm) v = 1 << 30;
+    else if (XFLAGS(m) & XF_CAP) v = 1000000 + ORDV[XTYPE(p.b[XTO(m)])] * 100 - ORDV[XTYPE(p.b[XFROM(m)])];
+    else if (m === killer[ply * 2]) v = 900000;
+    else if (m === killer[ply * 2 + 1]) v = 800000;
+    else v = hh[HIDX(p, m)];
+    sbuf[i] = v;
+  }
+}
+function pick(o, n, i) {
+  let bi = o + i;
+  for (let j = o + i + 1; j < o + n; j++) if (sbuf[j] > sbuf[bi]) bi = j;
+  const m = mbuf[bi], s = sbuf[bi];
+  mbuf[bi] = mbuf[o + i]; sbuf[bi] = sbuf[o + i];
+  mbuf[o + i] = m; sbuf[o + i] = s;
+  return m;
+}
+
+function qsearch(ply, alpha, beta) {
+  const p = stk[ply];
+  if ((++nodes & 1023) === 0) check_stop();
+  if (stop) return 0;
+  const stand = xq_evaluate(p);
+  if (ply >= MAXPLY - 1) return stand;
+  if (stand >= beta) return stand;
+  if (stand > alpha) alpha = stand;
+  if (mofs[ply] + MAXMOVES > MBUF) return stand;
+  const o = mofs[ply];
+  const n = xq_gen_moves(p, mbuf, 1, o);
+  mofs[ply + 1] = o + n;
+  order(p, o, n, 0, ply);
+  for (let i = 0; i < n; i++) {
+    const m = pick(o, n, i);
+    if (stand + XVAL[XTYPE(p.b[XTO(m)])] + 200 < alpha) continue;
+    if (!xq_make_move(p, stk[ply + 1], m)) continue;
+    const s = -qsearch(ply + 1, -beta, -alpha);
+    if (stop) return 0;
+    if (s >= beta) return s;
+    if (s > alpha) alpha = s;
+  }
+  return alpha;
+}
+
+function has_pieces(p) {
+  for (let r = 0; r < 10; r++)
+    for (let f = 0; f < 9; f++) {
+      const pc = p.b[XSQ(f, r)];
+      if (pc && XCOLOR(pc) === p.side && (XTYPE(pc) === XCHARIOT || XTYPE(pc) === XHORSE || XTYPE(pc) === XCANNON))
+        return 1;
+    }
+  return 0;
+}
+function hash32(x) {
+  x >>>= 0;
+  x ^= x >>> 16; x = Math.imul(x, 0x7feb352d); x ^= x >>> 15; x = Math.imul(x, 0x846ca68b | 0); x ^= x >>> 16;
+  return x >>> 0;
+}
+
+function negamax(ply, depth, alpha, beta, can_null) {
+  const p = stk[ply];
+  if ((++nodes & 1023) === 0) check_stop();
+  if (stop) return 0;
+  if (ply && (p.half >= 120 || is_rep(p))) return 0;
+  if (ply >= MAXPLY - 2) return xq_evaluate(p);
+  const incheck = xq_in_check(p);
+  if (incheck) depth++;
+  if (depth <= 0) return qsearch(ply, alpha, beta);
+
+  const e = p.lo & (tt_n - 1);
+  let ttm = 0;
+  if (ttH[e] === p.hi && ttL[e] === p.lo) {
+    ttm = ttM[e];
+    if (ply && ttD[e] >= depth) {
+      const s = score_from_tt(ttS[e], ply);
+      if (ttF[e] === TT_EXACT) return s;
+      if (ttF[e] === TT_LOWER && s >= beta) return s;
+      if (ttF[e] === TT_UPPER && s <= alpha) return s;
+    }
+  }
+
+  if (can_null && !incheck && ply && depth >= 3 && beta < MATE - 2 * MAXPLY && has_pieces(p) && xq_evaluate(p) >= beta) {
+    const n = copyPos(stk[ply + 1], p);
+    n.side ^= 1; n.hi ^= zsH; n.lo ^= zsL; n.half = 0;
+    repH[rep_n] = n.hi; repL[rep_n] = n.lo; rep_n++;
+    const R = depth > 6 ? 3 : 2;
+    const s = -negamax(ply + 1, depth - 1 - R, -beta, -beta + 1, 0);
+    rep_n--;
+    if (stop) return 0;
+    if (s >= beta) return s >= MATE - 2 * MAXPLY ? beta : s;
+  }
+
+  if (mofs[ply] + MAXMOVES > MBUF) return xq_evaluate(p);
+  const o = mofs[ply];
+  const n = xq_gen_moves(p, mbuf, 0, o);
+  mofs[ply + 1] = o + n;
+  order(p, o, n, ttm, ply);
+
+  let best = -INF, legal = 0, bm = 0;
+  const orig = alpha;
+  for (let i = 0; i < n; i++) {
+    const m = pick(o, n, i);
+    const c = stk[ply + 1];
+    if (!xq_make_move(p, c, m)) continue;
+    legal++;
+    repH[rep_n] = c.hi; repL[rep_n] = c.lo; rep_n++;
+    const quiet = !(XFLAGS(m) & XF_CAP);
+    const gives = xq_in_check(c);
+    let nz = 0;
+    if (ply === 0 && L.noise) nz = (hash32((m ^ L.seed) >>> 0) % (2 * L.noise + 1)) - L.noise;
+    const a = alpha - nz, bt = beta - nz;
+    let s;
+    if (legal === 1) s = -negamax(ply + 1, depth - 1, -bt, -a, 1);
+    else {
+      let r = 0;
+      if (depth >= 3 && legal > 3 && quiet && !incheck && !gives && m !== killer[ply * 2] && m !== killer[ply * 2 + 1])
+        r = legal > 10 ? 2 : 1;
+      s = -negamax(ply + 1, depth - 1 - r, -a - 1, -a, 1);
+      if (s > a && r) s = -negamax(ply + 1, depth - 1, -a - 1, -a, 1);
+      if (s > a && s < bt) s = -negamax(ply + 1, depth - 1, -bt, -a, 1);
+    }
+    rep_n--;
+    if (stop) return 0;
+    s += nz;
+    if (s > best) {
+      best = s; bm = m;
+      if (ply === 0) { root_best = m; root_score = s; }
+      if (s > alpha) {
+        alpha = s;
+        if (s >= beta) {
+          if (quiet) {
+            if (killer[ply * 2] !== m) { killer[ply * 2 + 1] = killer[ply * 2]; killer[ply * 2] = m; }
+            const idx = HIDX(p, m);
+            const v = hh[idx] + depth * depth;
+            hh[idx] = v > 30000 ? 30000 : v;
+          }
+          break;
+        }
+      }
+    }
+  }
+  if (!legal) return -MATE + ply;                       /* Xiangqi: no legal move loses, in check or not */
+
+  if (ttH[e] !== p.hi || ttL[e] !== p.lo || depth >= ttD[e] || best >= beta) {
+    ttH[e] = p.hi; ttL[e] = p.lo; ttM[e] = bm;
+    ttS[e] = score_to_tt(best, ply);
+    ttD[e] = depth;
+    ttF[e] = best >= beta ? TT_LOWER : best <= orig ? TT_UPPER : TT_EXACT;
+  }
+  return best;
+}
+
+/* lim: { depth, time_ms, noise, seed, max_nodes, now(), poll(), info(depth, score, nodes, best) };
+   keys: [hi, lo] pairs of the game so far */
+function xq_search(root, keys, lim) {
+  const R = { best: 0, score: 0, depth: 0, nodes: 0 };
+  L = lim; stop = 0; nodes = 0;
+  t0 = lim.now ? lim.now() : 0;
+  const n = xq_gen_legal(root, scratch);
+  if (!n) return R;
+  R.best = scratch[0];
+  const first = keys.length > MAXGAME ? keys.length - MAXGAME : 0;
+  rep_n = 0;
+  for (let i = first; i < keys.length; i++) { repH[rep_n] = keys[i][0]; repL[rep_n] = keys[i][1]; rep_n++; }
+  if (!rep_n || repH[rep_n - 1] !== root.hi || repL[rep_n - 1] !== root.lo) { repH[rep_n] = root.hi; repL[rep_n] = root.lo; rep_n++; }
+  for (let i = 0; i < 16 * 256; i++) hh[i] >>= 2;
+  killer.fill(0);
+  copyPos(stk[0], root);
+  mofs[0] = 0;
+  const maxd = lim.depth < 1 ? 1 : lim.depth > MAXPLY - 8 ? MAXPLY - 8 : lim.depth;
+  for (let d = 1; d <= maxd; d++) {
+    root_best = 0;
+    const s = negamax(0, d, -INF, INF, 1);
+    if (root_best) { R.best = root_best; R.score = stop ? root_score : s; R.depth = d; }
+    if (stop) break;
+    if (lim.info) lim.info(d, R.score, nodes, R.best);
+    if (n === 1 && d >= 2) break;
+    if (IS_MATE(s) && d >= 6) break;
+    if (lim.time_ms && lim.now && (lim.now() - t0) > lim.time_ms / 2) break;
+  }
+  R.nodes = nodes;
+  return R;
+}
+
+Object.assign(X, {
+  MAXMOVES, MAXGAME, INF, MATE, IS_MATE, XF_CAP, XMV, XFROM, XTO, XFLAGS, XEMPTY, XKING, XADVISOR, XELEPHANT, XHORSE,
+  XCHARIOT, XCANNON, XPAWN, XRED, XBLACK, XOFF, XTYPE, XCOLOR, XSQ, XFILE, XRANK, newPos, copyPos, ksq, xq_init,
+  xq_clear_tt, xq_from_fen, xq_to_fen, xq_pos_start, xq_attacked, xq_in_check, xq_gen_moves, xq_gen_legal,
+  xq_make_move, xq_perft, xq_move_to_str, xq_str_to_move, xq_move_to_wxf, xq_game_state, xq_evaluate, xq_search,
+});
+G.Xiangqi47 = X;
+if (typeof module !== 'undefined') module.exports = X;
+})(typeof self !== 'undefined' ? self : globalThis);
 </script>
-<script>window.CHESS47_BMP = {"pieces": [[], ["....................", "....................", "....................", "........####........", ".......######.......", ".......######.......", ".......######.......", "........####........", "......########......", "........####........", ".......######.......", ".......######.......", "......########......", ".....##########.....", "....############....", "....############....", "....++++++++++++....", "...##############...", "...##############...", "...................."], ["....................", ".......##.##........", "......########......", ".....##########.....", "....###+#########...", "....#############...", "...###############..", "..######..########..", "..#####...########..", "...###...#########..", "........#########...", ".......#########....", "......#########.....", "......#########.....", ".....###########....", "....#############...", "....+++++++++++++...", "...###############..", "...###############..", "...................."], [".........##.........", "........####........", ".........##.........", "........####........", ".......####+#.......", "......####+###......", "......###+####......", "......#+++++##......", "......##+#####......", ".......######.......", "........####........", ".......######.......", "........####........", "........####........", ".......######.......", "......########......", "....############....", "....++++++++++++....", "...##############...", "...##############..."], ["....................", "....##..####..##....", "....##..####..##....", "....############....", "....############....", ".....++++++++++.....", "......########......", "......########......", "......########......", "......########......", "......########......", "......########......", "......########......", ".....++++++++++.....", "....############....", "....############....", "...##############...", "...##############...", "...##############...", "...................."], ["..##.....##.....##..", "..##....####....##..", "...#.....##.....#...", "...##....##....##...", "...##...####...##...", "...###..####..###...", "....###.####.###....", "....############....", "....############....", ".....##########.....", ".....++++++++++.....", "......########......", "......########......", ".......######.......", "......########......", ".....##########.....", "....############....", "....++++++++++++....", "...##############...", "...##############..."], [".........##.........", ".......######.......", ".........##.........", "........####........", ".......######.......", "..####..####..####..", ".########++########.", ".#######+##+#######.", ".########++########.", "..################..", "...##############...", "....############....", ".....++++++++++.....", ".....##########.....", ".....##########.....", "....############....", "....++++++++++++....", "...##############...", "...##############...", "...................."]], "crazy": ["........########........", "......##........##......", "....##............##....", "...#................#...", "..#..................#..", "..#..#####.....#...#.#..", ".#..#.....#.....#.#...#.", ".#..#.###.#......#....#.", ".#..#.#.#.#.....#.#...#.", ".#..#.#...#....#...#..#.", ".#..#.#####...........#.", ".#....................#.", ".#...##..........##...#.", ".#....##.##.##.##.....#.", ".#......##.##.##......#.", "..#..........###.....#..", "..#..........#.#.....#..", "...#.........###....#...", "....##.............#....", "......##........##......", "........########........", "........................"]};</script>
+<script>window.CHESS47_BMP = {"pieces": [[], ["....................", "....................", "....................", "........####........", ".......######.......", ".......######.......", ".......######.......", "........####........", "......########......", "........####........", ".......######.......", ".......######.......", "......########......", ".....##########.....", "....############....", "....############....", "....++++++++++++....", "...##############...", "...##############...", "...................."], ["....................", ".......##.##........", "......########......", ".....##########.....", "....###+#########...", "....#############...", "...###############..", "..######..########..", "..#####...########..", "...###...#########..", "........#########...", ".......#########....", "......#########.....", "......#########.....", ".....###########....", "....#############...", "....+++++++++++++...", "...###############..", "...###############..", "...................."], [".........##.........", "........####........", ".........##.........", "........####........", ".......####+#.......", "......####+###......", "......###+####......", "......#+++++##......", "......##+#####......", ".......######.......", "........####........", ".......######.......", "........####........", "........####........", ".......######.......", "......########......", "....############....", "....++++++++++++....", "...##############...", "...##############..."], ["....................", "....##..####..##....", "....##..####..##....", "....############....", "....############....", ".....++++++++++.....", "......########......", "......########......", "......########......", "......########......", "......########......", "......########......", "......########......", ".....++++++++++.....", "....############....", "....############....", "...##############...", "...##############...", "...##############...", "...................."], ["..##.....##.....##..", "..##....####....##..", "...#.....##.....#...", "...##....##....##...", "...##...####...##...", "...###..####..###...", "....###.####.###....", "....############....", "....############....", ".....##########.....", ".....++++++++++.....", "......########......", "......########......", ".......######.......", "......########......", ".....##########.....", "....############....", "....++++++++++++....", "...##############...", "...##############..."], [".........##.........", ".......######.......", ".........##.........", "........####........", ".......######.......", "..####..####..####..", ".########++########.", ".#######+##+#######.", ".########++########.", "..################..", "...##############...", "....############....", ".....++++++++++.....", ".....##########.....", ".....##########.....", "....############....", "....++++++++++++....", "...##############...", "...##############...", "...................."]], "crazy": ["........########........", "......##........##......", "....##............##....", "...#................#...", "..#..................#..", "..#..#####.....#...#.#..", ".#..#.....#.....#.#...#.", ".#..#.###.#......#....#.", ".#..#.#.#.#.....#.#...#.", ".#..#.#...#....#...#..#.", ".#..#.#####...........#.", ".#....................#.", ".#...##..........##...#.", ".#....##.##.##.##.....#.", ".#......##.##.##......#.", "..#..........###.....#..", "..#..........#.#.....#..", "...#.........###....#...", "....##.............#....", "......##........##......", "........########........", "........................"], "letters": [[], ["....................", "....................", "....................", "....................", ".....#########......", ".....##########.....", ".....###....####....", ".....###....####....", ".....###....####....", ".....###....####....", ".....###....####....", ".....##########.....", ".....#########......", ".....###............", ".....###............", ".....###............", ".....###............", ".....###............", "....................", "...................."], ["....................", "....................", "....................", "....................", "....####.....###....", "....#####....###....", "....#####....###....", "....######...###....", "....######...###....", "....###.###..###....", "....###.###..###....", "....###..###.###....", "....###..###.###....", "....###...######....", "....###...######....", "....###....#####....", "....###....#####....", "....###.....####....", "....................", "...................."], ["....................", "....................", "....................", "....................", ".....########.......", ".....##########.....", ".....###...####.....", ".....###....####....", ".....###....####....", ".....###...####.....", ".....#########......", ".....##########.....", ".....###....####....", ".....###....####....", ".....###....####....", ".....###....####....", ".....##########.....", ".....#########......", "....................", "...................."], ["....................", "....................", "....................", "....................", ".....########.......", ".....##########.....", ".....###...####.....", ".....###....###.....", ".....###....###.....", ".....###....###.....", ".....###...####.....", ".....#########......", ".....#########......", ".....###...####.....", ".....###....###.....", ".....###....####....", ".....###.....###....", ".....###.....####...", "....................", "...................."], ["....................", "....................", "....................", ".....##########.....", "....####....####....", "....###......###....", "...####......####...", "...####......####...", "...####......####...", "...####......####...", "...####......####...", "...####......####...", "....###......###....", "....####....####....", ".....##########.....", ".......#######......", "...........###......", "............###.....", "............####....", "...................."], ["....................", "....................", "....................", "....................", "....###.....####....", "....###....####.....", "....###...####......", "....###..####.......", "....###.####........", "....#######.........", "....######..........", "....#######.........", "....########........", "....###.#####.......", "....###..#####......", "....###...#####.....", "....###....#####....", "....###.....#####...", "....................", "...................."]]};
+window.XQ_BMP = {"size":23,"sizeN":19,"pieces":[[[[65024,247680,917728,1572912,3145752,2163208,6357516,4427652,13033414,12866118,8884802,8655426,8786498,13095494,12866182,4604420,6799884,2097672,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2131464,6325772,4261380,12781062,12795846,8848898,8455682,8455682,12649990,12649990,4261380,6373324,2179016,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2166664,6365132,4298948,13097158,12656582,8460482,8624194,8624322,12656582,12654790,4266180,6365132,2169032,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2178952,6366732,4400644,12789254,13050374,8863618,8593922,8601538,12779590,12779590,4390980,6488140,2293896,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2098184,6373324,4260868,12787334,12985542,8857282,8595138,8594626,12787590,12780550,4423620,6489612,2294792,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2164744,6360972,4263876,12668998,12688966,8589890,8458818,8461890,12652678,12816518,4329476,6426700,2101128,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2129672,6406156,4292612,12681222,12713862,8487426,8487426,8487426,13107142,12582918,4194308,6390156,2228360,3145752,1572912,917728,247680,65024]],[[65024,262016,1048544,2097136,4194296,3766776,7955004,7957372,16350334,16280830,16741374,16737918,16277566,16343102,16348798,7960188,8093308,3898616,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4190200,8384508,8384508,16773118,16252990,16252990,16773118,16773118,16773118,16773118,8384508,8374268,3932216,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4130808,8258556,8156156,16515198,16576126,16646270,16719870,16567934,16744702,16540414,8360572,8155964,4048888,4186104,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,3932280,8316924,8257788,16533502,16533502,16646398,16705534,16515134,16777022,16645950,8203580,7972668,3931768,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4179960,7864380,8384508,16646270,16565886,16515198,16515198,16565886,16515198,16773118,7864380,7864380,4190200,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,3684344,7872572,8183868,16633662,16632766,16523710,16328126,16328126,16326974,16328318,8136700,8153020,4055096,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4190200,7864380,8126524,16743934,16677374,16658686,16574078,16639998,16764926,16252990,8374268,8384508,4190200,4194296,2097136,1048544,262016,65024]]],[[[65024,247680,917728,1572912,3145752,2097160,6832396,5022468,13423366,13281030,9264386,9087746,8738306,13020678,12933638,4632068,7339788,2097160,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3669912,2359432,6653580,4508804,12875910,12871814,8681602,8572162,8538370,12780294,12682758,4246532,6322188,2109448,3145752,1572912,917728,247680,65024],[65024,247680,917728,1703472,3626392,2862792,7756140,6107812,13950182,14331302,9360706,8826242,8442882,12609542,12605446,4204548,6297612,2100232,3147288,1572912,917728,247680,65024],[65024,247680,917728,1628208,3241496,2272008,6509964,4647620,13473094,13310662,8795458,8415874,8443138,12691974,12670214,4369028,6509964,2534088,3669976,1572912,917728,247680,65024],[65024,247680,917728,1734960,3365656,2273032,6509836,4303364,12670470,12691974,8476162,8497666,8476162,12691974,12801286,4369156,6641036,2534024,3669912,1572912,917728,247680,65024],[65024,247680,917728,1573104,3146584,2100968,6305164,4255236,13064198,13017094,9256962,8814594,8615938,12692998,12802822,4352260,6511372,2207240,3176472,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2127880,6345740,4238340,12605446,12626950,8411138,8432642,8442882,12691974,12801286,4369156,6509836,2534024,3669912,1572912,917728,247680,65024]],[[65024,262016,1048544,2097136,4194296,4194296,7847676,7544060,15928574,15800574,15728894,15728894,16253438,16253438,16418302,7864828,7340284,4194296,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,3670136,3932024,8026492,8074108,16484222,16484222,16484222,16593662,16627454,16579838,16677374,8336380,8357884,4182008,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,1966576,3670136,3145784,6391324,6475036,14877470,14746142,15794750,16319102,16712702,16746494,16746494,8374268,8382460,4191224,4192760,2097136,1048544,262016,65024],[65024,262016,1048544,2041840,4063736,3932408,8126588,7864380,15753278,15786046,16367678,16744574,16711934,16646654,16646398,8126588,8126588,3670072,3670072,2097136,1048544,262016,65024],[65024,262016,1048544,1935088,3966200,3932408,8126716,8258044,16646654,16646654,16646654,16646654,16646654,16646654,16515326,8126716,7864444,3670136,3670136,2097136,1048544,262016,65024],[65024,262016,1048544,2096912,4193288,4190232,8372348,8323580,16254974,16261118,15745022,16285694,16517118,16646654,16549118,8226556,8160508,4063736,4163576,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4163576,8324092,8324092,16746494,16712702,16746494,16712702,16712702,16646654,16515326,8126716,8126716,3670136,3670136,2097136,1048544,262016,65024]]],[[[65024,247680,917728,1572912,3145752,2097160,6291980,4244996,12635142,12638214,8450050,8445954,8450050,12638214,12635142,4244996,6291468,2097160,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2097160,6291468,4208644,12597254,12594182,8414210,8406018,8439298,12647942,12616198,4293380,6291724,2097160,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2097160,6323212,4259332,12632070,12632070,8437762,8453122,8437762,12632070,12632070,4259332,6323724,2097160,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2097160,6324236,4227588,12616198,12616198,8421890,8453634,8421890,12616198,12616198,4227588,6324236,2097160,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2097160,6320140,4258820,12616710,12617222,8422402,8452098,8440834,12616710,12617222,4243972,6291468,2097160,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2097160,6298636,4224772,12632070,12615686,8421378,8486914,8421378,12615686,12632070,4224772,6298636,2097160,3145752,1572912,917728,247680,65024],[65024,247680,917728,1572912,3145752,2097160,6322188,4226564,12600838,12599814,8406530,8420866,8419330,12599302,12599302,4210692,6307852,2097160,3145752,1572912,917728,247680,65024]],[[65024,262016,1048544,2097136,4194296,4194296,8339452,8339452,16728062,16726526,16724478,16713726,16715774,16713726,16720894,8335868,8337660,4194296,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4194296,8388604,8388604,16712702,16773630,16773630,16712190,16726526,16724478,16712190,8388604,8388604,4194296,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4194296,8388604,8388604,16745470,16726526,16726526,16646398,16728062,16719358,16744958,8388604,8388604,4194296,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4194296,8339452,8339452,16728062,16720894,16712190,16718334,16726526,16726526,16726526,8337916,8337916,4194296,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4194296,8388604,8388604,16744958,16744958,16748542,16748542,16748542,16748542,16748542,8388604,8388604,4194296,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4194296,8388604,8388604,16744958,16748542,16719870,16719870,16719870,16748542,16744958,8388604,8388604,4194296,4194296,2097136,1048544,262016,65024],[65024,262016,1048544,2097136,4194296,4194296,8332284,8323580,16718078,16726270,16726270,16726270,16712190,16720894,16728062,8339452,8339452,4194296,4194296,2097136,1048544,262016,65024]]]],"piecesN":[[[[260096,990720,1573632,3146112,6691008,4593728,13598304,13195872,9392672,9196064,9392672,13459040,13195360,5183552,6297792,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6492352,4329536,12980320,13041248,9371168,8785952,8785952,12980320,12980320,4652608,6749888,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6438080,4357696,13582944,13598304,8814112,8864288,8879648,13270624,12730976,4357696,6448832,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6487232,4624448,12909664,13406304,9239584,8687648,8715808,12845664,12883552,4522560,6554816,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6435008,4652608,12857440,13434464,9238048,8713760,8715808,12857440,12910176,4468800,6557888,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6693056,4603456,13059680,13623904,9335328,8802848,8812064,12993632,12927072,4997696,6307008,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6420672,4440128,12714080,12844128,8591392,8523808,8591392,13631072,12583008,4398144,6554816,3146112,1573632,990720,260096]],[[260096,1048064,2096896,4194176,7653312,7635392,16034784,15771616,16549856,16554976,15729120,15761888,16030688,7656384,7660480,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8372160,8372160,16760800,16719840,15729120,16760800,16760800,16760800,16760800,8331200,7864768,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8134592,7970752,15729632,16364512,16253920,16530400,16327648,16287712,16454624,7920064,8068544,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,7865280,7970752,16253920,16359392,16253920,16359392,16253408,16775648,16427488,7510464,7795648,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8331200,7340480,16719840,16253920,16323552,16253920,16253920,16517088,15729120,7340480,8372160,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,7397312,7373248,16482784,16465376,16254432,15762912,15893984,15892960,15776736,7904704,8094144,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8372160,7340480,16262112,16576480,16533472,16356320,16760800,15729120,15729120,8372160,8372160,4194176,2096896,1048064,260096]]],[[[260096,990720,1573632,3146112,6291648,4754496,13453408,13490272,9402400,9088032,9263136,13019232,12933216,5240896,6291648,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6814912,4457536,12956768,12903520,8709152,8762400,8692768,12716128,12652640,4251712,6308032,3146112,1573632,990720,260096],[260096,990720,1573632,3406208,7165632,6011712,13952352,14267232,9786656,9287200,8474656,12623968,12640352,4218944,6303936,3150208,1573632,990720,260096],[260096,990720,1573632,3273088,6510784,4632128,12965472,13331296,9327904,8694304,8475680,12691552,12801120,4631104,6641344,4194176,1573632,990720,260096],[260096,990720,1573632,3466624,6773952,4631616,12802144,12693600,8607776,8562720,8474656,12757088,12932192,4631616,7165632,4194176,1573632,990720,260096],[260096,990720,1573632,3147648,6294976,4210496,12703840,13033568,9273376,9109536,8839200,12826720,13036640,4631616,6510784,3203456,1573632,990720,260096],[260096,990720,1573632,3146112,6348992,4304960,12669024,12623968,8474656,8429600,8474656,12757088,12932192,4631616,6640832,4194176,1573632,990720,260096]],[[260096,1048064,2096896,4194176,8388544,7828416,15874016,15869920,15730656,15729632,15730656,16254944,16254944,7342016,8388544,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,7865280,8125376,16403424,16456672,16456672,16403424,16473056,16644064,16707552,8331200,8372160,4194176,2096896,1048064,260096],[260096,1048064,2096896,3934080,7340480,6291648,14883040,15076576,14813408,15862240,16650208,16719840,16719840,8363968,8376256,4190080,2096896,1048064,260096],[260096,1048064,2096896,4067200,8128448,7864768,16253408,15761632,15827168,16450016,16647136,16648160,16516064,7864768,7864768,3145856,2096896,1048064,260096],[260096,1048064,2096896,3873664,7865280,7865280,16517088,16650208,16517088,16517088,16650208,16517088,16253920,7865280,7340480,3146112,2096896,1048064,260096],[260096,1048064,2096896,4192384,8384576,8372416,16648160,16261088,15761376,15794144,16326624,16517088,16323552,7934912,8128448,4136832,2096896,1048064,260096],[260096,1048064,2096896,4194176,8331200,8261568,16650208,16719840,16650208,16719840,16650208,16517088,16253920,7865280,7865280,3146112,2096896,1048064,260096]]],[[[260096,990720,1573632,3146112,6291648,4264000,12660832,12673120,8503328,8486944,8470560,12656736,12652640,4261952,6291648,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6291648,4210752,12640352,12623968,8429600,8458272,8499232,12712032,12716128,4327488,6291648,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6291648,4321344,12648544,12648544,8454176,8515616,8454176,12648544,12648544,4321344,6291648,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6291648,4194368,12785760,12781664,8591392,8648736,8587296,12781664,12785760,4194368,6291648,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6291648,4317248,12660832,12652640,8458272,8511520,8466464,12652640,12654688,4261952,6291648,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6291648,4223040,12683360,12779616,8519712,8519712,8519712,12779616,12683360,4223040,6291648,3146112,1573632,990720,260096],[260096,990720,1573632,3146112,6291648,4251712,12685408,12654688,8460320,8515616,8486944,12648544,12648544,4259904,6291648,3146112,1573632,990720,260096]],[[260096,1048064,2096896,4194176,8388544,8323008,16678880,16674784,16699360,16654304,16662496,16654304,16666592,8316864,8388544,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8388544,8388544,16654304,16650208,16764896,16648160,16566240,16517088,16658400,8388544,8388544,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8388544,8388544,16719840,16650208,16574432,16517088,16580576,16648160,16715744,8388544,8388544,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8388544,8323008,16580576,16572384,16519136,16541664,16574432,16574432,16574432,8316864,8388544,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8388544,8388544,16740320,16715744,16728032,16728032,16728032,16728032,16744416,8388544,8388544,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8388544,8388544,16748512,16650208,16678880,16678880,16678880,16650208,16748512,8388544,8388544,4194176,2096896,1048064,260096],[260096,1048064,2096896,4194176,8388544,8294336,16517088,16541664,16574432,16541664,16517088,16572384,16580576,8323008,8388544,4194176,2096896,1048064,260096]]]],"disc":[65024,262016,1048544,2097136,4194296,4194296,8388604,8388604,16777214,16777214,16777214,16777214,16777214,16777214,16777214,8388604,8388604,4194296,4194296,2097136,1048544,262016,65024],"discN":[260096,1048064,2096896,4194176,8388544,8388544,16777184,16777184,16777184,16777184,16777184,16777184,16777184,8388544,8388544,4194176,2096896,1048064,260096],"river":[[0,6192,32508,15472,16120,22708,0,16380,16380,264,7152,14592,16128,25596,0],[0,10236,14332,8,8,25544,29256,584,968,5064,4616,12296,24600,120,0],[0,10236,4920,496,192,18424,9932,1016,192,5116,4288,14332,8624,1820,0],[0,16376,12568,16376,13208,13208,16376,3168,14392,31868,1120,3168,6240,4192,0]],"seven":[[0,1536,1536,1536,1536,2044,32736,32256,1536,1536,1536,1536,2040,1016,0],[0,8176,12304,16368,12304,16368,4096,4352,16376,24960,8176,4080,896,32764,0],[0,32380,13832,13944,13936,14076,30208,1008,16256,272,4368,14648,26988,256,0],[0,896,1728,16376,28684,16376,12632,13656,8176,0,7152,8176,6192,8176,0]]};</script>
 <script>/*
- * CHESS47 web - the DM42n program's screen and keys in the browser (src/main.c), the engine (engine.js) in a
- * Web Worker. (C) 2026 Victor Valdes - GPL-3.0-or-later
+ * CHESS47 web - the DM42n program's screen and keys in the browser (src/main.c, src/xq_ui.c): chess and
+ * Xiangqi, the engines (engine.js, xq_engine.js) in a Web Worker. (C) 2026 Victor Valdes - GPL-3.0-or-later
  */
 'use strict';
 (function () {
 const E = window.Chess47;
 const { WHITE, BLACK, NOSQ, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, F_CAP, F_EP, F_CASTLE } = E;
 const { MFROM, MTO, MPROMO, MFLAGS, PTYPE, PCOLOR, SQ, FILE_OF, RANK_OF, ONBOARD } = E;
+const X = window.Xiangqi47, XB = window.XQ_BMP;
 
 /* ---- layout: the DM42n's 400 x 240 LCD, drawn S times larger ---- */
 const LCD_X = 400, LCD_Y = 240, S = 3;
-const SQPX = 26, BX = 192, BY = 0, BOARD_PX = 8 * SQPX, PANEL_W = 186;
+/* chess: normal 26 px squares beside the panel, the soft keys below; zoom (+ / -) 30 px squares, the full height,
+   no soft keys (they still work; SHIFT shows the game menu). Xiangqi: src/xq_ui.c's layout */
+let SQPX, BX, BOARD_PX, PANEL_W, GLYPH, PANEL_EDGE;
+const BY = 0;
 const MENU_Y = 216, MENU_H = 24;
+let XGAP, XB0, XY0, XPANEL, XR, XPS;
+function layout() {
+  SQPX = cfg.zoom ? 30 : 26; BX = cfg.zoom ? 160 : 192; BOARD_PX = 8 * SQPX; PANEL_W = BX - 6; GLYPH = cfg.zoom ? 26 : 20;
+  XGAP = cfg.zoom ? 24 : 21; XB0 = cfg.zoom ? 196 : 222; XY0 = cfg.zoom ? 11 : 9; XPANEL = cfg.zoom ? 182 : 209;
+  XR = cfg.zoom ? 12 : 11; XPS = cfg.zoom ? XB.size : XB.sizeN;
+  PANEL_EDGE = xq ? XPANEL : BX - 2;
+}
 const LH = 21;                                            /* the t20 font's line height */
 const FONT = `bold ${16 * S}px "DejaVu Sans Mono", "Menlo", "Consolas", monospace`;
 const INK = '#22261e', PAPER = '#c7cdba';
@@ -896,7 +1479,10 @@ const store = {
   get(k) { try { return JSON.parse(localStorage.getItem('chess47.' + k)); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem('chess47.' + k, JSON.stringify(v)); } catch (e) { /* private window */ } },
 };
-const cfg = Object.assign({ level: 4, mode: MODE_HC, human: WHITE, flip: 0, tc: 0, sound: 1, page: 0, calc: 1 }, store.get('cfg') || {});
+const cfg = Object.assign({ level: 4, mode: MODE_HC, human: WHITE, flip: 0, tc: 0, sound: 1, page: 0, calc: 1,
+                            game: 'chess', pstyle: 0, xstyle: 0, zoom: 0 }, store.get('cfg') || {});
+let xq = cfg.game === 'xq' ? 1 : 0;                       /* the game on the screen: 0 chess, 1 Xiangqi */
+let shift = 0;                                            /* SHIFT: the game menu on the soft keys */
 const G = { hist: [E.newPos()], moves: [], san: [], keys: [], n: 0, over: 0, pos960: -1, legal: [], start: null, rfile: [7, 0], c960: 0 };
 let cur = 0x14, sel = NOSQ, hint_from = NOSQ, hint_to = NOSQ, last_from = NOSQ, last_to = NOSQ;
 let status = '', promo_mode = 0, promo_opts = [0, 0, 0, 0], thinking = 0, kirk = 0, info_screen = 0;
@@ -904,6 +1490,13 @@ let resigner = -1, offer = -1, confirm = '', cpu_score = 0, cpu_scored = 0;   /*
 let clk = [0, 0], turn_start = 0, clk_live = 0;
 let last = { depth: 0, nodes: 0, ms: 0, score: 0 };
 const CUR = () => G.hist[G.n];
+/* Xiangqi's game (kept while chess is played, and the other way round) */
+const XG = { start: '', hist: [], moves: [], wxf: [], keys: [], n: 0, over: 0, legal: [] };
+const XCUR = () => XG.hist[XG.n];
+let xseven = 0;                                           /* the Seven Stars (SHIFT 7) */
+let xcur = 0, xsel = -1, xlast_from = -1, xlast_to = -1, xhint_from = -1, xhint_to = -1, xresigner = -1, xcpu_score = 0;
+const side_now = () => xq ? XCUR().side : CUR().side;
+const over_now = () => xq ? XG.over : G.over;
 const now = () => performance.now();
 
 E.eng_init(1 << 16);                                      /* the main thread: moves and notation only */
@@ -927,8 +1520,8 @@ function beep(hz, ms) {
 
 /* ---- clock ---- */
 function clock_reset() { const t = TCS[cfg.tc]; clk = [t.base * 1000, t.base * 1000]; clk_live = 0; turn_start = now(); }
-function clock_left(side) { return clk_live && side === CUR().side ? clk[side] - (now() - turn_start) : clk[side]; }
-function clock_update_live() { clk_live = cfg.tc && !G.over && G.n > 0 ? 1 : 0; if (clk_live) turn_start = turn_start || now(); }
+function clock_left(side) { return clk_live && side === side_now() ? clk[side] - (now() - turn_start) : clk[side]; }
+function clock_update_live() { clk_live = cfg.tc && !over_now() && (xq ? XG.n : G.n) > 0 ? 1 : 0; if (clk_live) turn_start = turn_start || now(); }
 function fmt_clock(ms) {
   if (ms < 0) ms = 0;
   const t = Math.floor((ms + 999) / 1000);
@@ -1043,11 +1636,27 @@ function worker_make() {
   };
 }
 function worker_main() {                                  /* runs inside the worker */
-  const E = self.Chess47;
+  const E = self.Chess47, X = self.Xiangqi47;
   E.eng_init(1 << 20);
+  let xready = 0;
   self.onmessage = ev => {
     const d = ev.data;
-    if (d.cmd === 'newgame') { E.eng_clear_tt(); return; }
+    if (d.cmd === 'newgame') { E.eng_clear_tt(); if (xready) X.xq_clear_tt(); return; }
+    if (d.cmd === 'xsearch') {                            /* Xiangqi: its own tables (2^20 entries, as chess's) */
+      if (!xready) { X.xq_init(1 << 20); xready = 1; }
+      const p = X.newPos();
+      X.xq_from_fen(p, d.start);
+      const keys = [[p.hi, p.lo]];
+      let q = p;
+      for (const m of d.moves) { const n = X.newPos(); X.xq_make_move(q, n, m); q = n; keys.push([q.hi, q.lo]); }
+      const t0 = performance.now();
+      const r = X.xq_search(q, keys, {
+        depth: d.depth, time_ms: d.ms, noise: d.noise, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
+        info: (depth, score, nodes, best) => self.postMessage({ type: 'info', depth, score, nodes, best, san: X.xq_move_to_wxf(q, best) }),
+      });
+      self.postMessage({ type: 'done', best: r.best, score: r.score, depth: r.depth, nodes: r.nodes, ms: performance.now() - t0 });
+      return;
+    }
     if (d.cmd !== 'search') return;
     E.c_rfile[0] = d.rfile[0]; E.c_rfile[1] = d.rfile[1]; E.chess960 = d.c960;
     const p = E.newPos();
@@ -1069,7 +1678,9 @@ function run_search(depth, ms, noise, oninfo) {
   return new Promise(resolve => {
     wjob = { resolve, oninfo, best: 0 };
     const max_nodes = cfg.calc ? Math.max(1, (ms || 0) * DM42N_NPS) : 0;
-    worker_call({ cmd: 'search', start: G.start, rfile: G.rfile, c960: G.c960, moves: G.moves.slice(0, G.n),
+    worker_call(xq ? { cmd: 'xsearch', start: XG.start, moves: XG.moves.slice(0, XG.n), depth, ms: cfg.calc && ms ? 0 : ms,
+                       noise, seed: (Math.random() * 4294967296) >>> 0, max_nodes: cfg.calc && ms ? max_nodes : 0 } :
+                {     cmd: 'search', start: G.start, rfile: G.rfile, c960: G.c960, moves: G.moves.slice(0, G.n),
                   depth, ms: cfg.calc && ms ? 0 : ms, noise, seed: (Math.random() * 4294967296) >>> 0,
                   max_nodes: cfg.calc && ms ? max_nodes : 0 });
   });
@@ -1088,7 +1699,7 @@ function move_now() {                                     /* EXIT while thinking
 
 function think_time(level_ms) {
   if (!cfg.tc) return level_ms;
-  const left = clock_left(CUR().side);
+  const left = clock_left(side_now());
   let t = left / 25 + TCS[cfg.tc].inc * 750;
   if (t > left / 3) t = left / 3;
   if (t < 50) t = 50;
@@ -1231,7 +1842,11 @@ function deserialize(s) {
   status = '';
   return 1;
 }
-function save_auto() { store.set('auto', serialize()); store.set('cfg', cfg); }
+function save_auto() {
+  if (G.hist.length && G.start) store.set('auto', serialize());
+  if (XG.hist.length) store.set('xq', xq_serialize());
+  store.set('cfg', cfg);
+}
 
 /* ---- keys ---- */
 function move_cursor(dx, dy) {
@@ -1301,6 +1916,8 @@ const accept_pending = () => cfg.mode === MODE_HH && offer === (CUR().side ^ 1) 
 
 function softkey(fn) {
   if (info_screen) { info_screen = 0; return; }
+  if (shift && !promo_mode) { game_menu(fn); return; }
+  if (xq) { xq_softkey(fn); return; }
   if (promo_mode) {
     if (fn < 4 && promo_opts[fn]) { promo_mode = 0; do_move(promo_opts[fn]); }
     else if (fn === 5) { promo_mode = 0; sel = NOSQ; }
@@ -1337,11 +1954,17 @@ function softkey(fn) {
   store.set('cfg', cfg);
 }
 
-function key(k, shift) {
+function key(k, shifted) {
   if (info_screen) { info_screen = 0; return; }
-  if (shift && k === 'Backspace') { resign(1); return; }
+  if (shifted && k === 'Backspace') { shift = 0; if (xq) xq_resign(1); else resign(1); return; }
   if (k === 'i') { info_screen = 1; return; }
+  if (k === 'Escape' && shift) { shift = 0; return; }
+  if (shift && k === '7') { shift = 0; xq_seven(); return; }
+  shift = 0;
   if (promo_mode) { if (k === 'Escape') { promo_mode = 0; sel = NOSQ; } return; }
+  if (k === '*' || k === 'x') { piece_style(); return; }
+  if (k === '+' || k === '-') { zoom_toggle(); return; }
+  if (xq) { xq_key(k); return; }
   status = thinking ? status : '';
   switch (k) {
   case 'ArrowUp': case '8': move_cursor(0, 1); break;
@@ -1358,6 +1981,352 @@ function key(k, shift) {
   }
 }
 
+/* ======== Xiangqi (src/xq_ui.c): the same levels, clock, modes and keys; WXF moves ======== */
+const XQ_MENU = [
+  ['NEW', 'LEVEL', 'FLIP', 'UNDO', 'HINT', '>>'],
+  ['PIECES', 'CLOCK', 'SIDE', 'RESIGN', 'DRAW', '>>'],
+  ['CHESS', 'MODE', 'FEN', '', '', '>>'],
+];
+const XQ_START = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1';
+const XQ_STYLE = ['Pieces: characters', 'Pieces: symbols', 'Pieces: letters'];
+X.xq_init(1 << 10);                                       /* the main thread: moves and notation only */
+
+function xq_refresh_legal() {
+  const ml = new Uint32Array(X.MAXMOVES), n = X.xq_gen_legal(XCUR(), ml);
+  XG.legal = Array.from(ml.subarray(0, n));
+}
+function xq_new_game_from(fen) {
+  const p = X.newPos();
+  if (!X.xq_from_fen(p, fen)) return 0;
+  XG.start = fen; XG.hist = [p]; XG.moves = []; XG.wxf = []; XG.keys = [[p.hi, p.lo]]; XG.n = 0; XG.over = 0;
+  xsel = xhint_from = xhint_to = xlast_from = xlast_to = -1;
+  xresigner = offer = -1; confirm = ''; xcpu_score = 0;
+  xcur = X.XSQ(7, 2);                                     /* Red's cannon: C2=5 is the most common first move */
+  xseven = fen === XQ_SEVEN ? 1 : 0;
+  status = ''; clock_reset(); xq_refresh_legal();
+  worker_call({ cmd: 'newgame' });
+  return 1;
+}
+function xq_new_game() { xq_new_game_from(XQ_START); save_auto(); }
+
+/* SHIFT 7 (七, seven): 七星聚會, the Seven Stars Gathering, the king of the classical endgames, as 竹香齋 (1801) sets
+   it: Red 帥 e1, 俥 g1 h1, 炮 h3, 兵 d9 f8 i5; Black 將 f10, 車 e10, 象 e8, 卒 b3 e3 d2 f2. Red to move; with the best
+   play a draw. The famous line: 炮二平四 卒5平6 兵四進一 將6進1 俥三進八 將6退1 ... */
+const XQ_SEVEN = '4rk3/3P5/4bP3/9/9/8P/9/1p2p2C1/3p1p3/4K1RR1 w - - 0 1';
+function xq_seven() {
+  if (thinking) move_now_discard();
+  if (!xq) { xq = 1; cfg.game = 'xq'; offer = -1; }
+  xq_new_game_from(XQ_SEVEN);
+  status = 'Seven Stars 1801';
+  beep(784, 120); setTimeout(() => beep(988, 120), 130); setTimeout(() => beep(1175, 120), 260); setTimeout(() => beep(1568, 300), 390);
+  save_auto();
+}
+
+function xq_result(code) {
+  const loser = code === 7 ? xresigner : XCUR().side;
+  switch (code) {
+  case 1: return loser === X.XRED ? 'Checkmate  0-1' : 'Checkmate  1-0';
+  case 2: return loser === X.XRED ? 'No moves  0-1' : 'No moves  1-0';      /* stalemate loses in Xiangqi */
+  case 3: return '60 moves  1/2';
+  case 4: return 'No attackers 1/2';
+  case 5: return 'Repetition 1/2';
+  case 6: return loser === X.XRED ? 'Red flag fell 0-1' : 'Black flag 1-0';
+  case 7: return loser === X.XRED ? 'Red resigns 0-1' : 'Black resigns 1-0';
+  case 8: return 'Draw agreed 1/2';
+  }
+  return '';
+}
+
+function xq_do_move(m) {
+  if (XG.n >= X.MAXGAME) { status = 'Game too long'; return; }
+  const p = XCUR(), mover = p.side;
+  if (clk_live) {
+    clk[mover] -= now() - turn_start;
+    if (clk[mover] <= 0) { clk[mover] = 0; XG.over = 6; clk_live = 0; beep(330, 400); return; }
+    clk[mover] += TCS[cfg.tc].inc * 1000;
+  }
+  turn_start = now();
+  if (offer >= 0 && mover !== offer) offer = -1;            /* moving declines the other side's draw offer */
+  XG.wxf[XG.n] = X.xq_move_to_wxf(p, m);
+  const q = X.newPos();
+  X.xq_make_move(p, q, m);
+  XG.moves[XG.n] = m;
+  XG.n++;
+  XG.hist[XG.n] = q;
+  XG.hist.length = XG.n + 1; XG.moves.length = XG.n; XG.wxf.length = XG.n;
+  XG.keys[XG.n] = [q.hi, q.lo]; XG.keys.length = XG.n + 1;
+  xlast_from = X.XFROM(m); xlast_to = X.XTO(m);
+  xsel = xhint_from = xhint_to = -1;
+  status = '';
+  xq_refresh_legal();
+  const st = X.xq_game_state(XCUR(), XG.keys);
+  if (st) { XG.over = st; clk_live = 0; beep(st <= 2 ? 440 : 660, 250); }
+  clock_update_live();
+  beep(X.XFLAGS(m) & X.XF_CAP ? 1400 : 1000, 18);
+  save_auto();
+}
+
+function xq_undo() {
+  if (!XG.n || thinking) return;
+  let plies = 1;
+  if (cfg.mode === MODE_HC && XG.n >= 2 && !is_human(XG.hist[XG.n - 1].side)) plies = 2;
+  XG.n = Math.max(0, XG.n - plies);
+  XG.hist.length = XG.n + 1; XG.moves.length = XG.n; XG.wxf.length = XG.n; XG.keys.length = XG.n + 1;
+  XG.over = 0;
+  xsel = xhint_from = xhint_to = xlast_from = xlast_to = -1;
+  if (XG.n) { xlast_from = X.XFROM(XG.moves[XG.n - 1]); xlast_to = X.XTO(XG.moves[XG.n - 1]); }
+  status = '';
+  xq_refresh_legal();
+  turn_start = now();
+  clock_update_live();
+  save_auto();
+}
+
+const score_text = d => X.IS_MATE(d.score) ? `d${d.depth} ${d.san} M${d.score < 0 ? '-' : ''}${Math.floor((X.MATE - Math.abs(d.score) + 1) / 2)}`
+                                           : `d${d.depth} ${d.san} ${d.score >= 0 ? '+' : ''}${d.score}`;
+async function xq_cpu_move() {
+  const L = LEVELS[cfg.level];
+  let m;
+  if (cfg.level === 0) { await sleep(250); m = XG.legal[Math.floor(Math.random() * XG.legal.length)]; }
+  else {
+    thinking = 1; status = 'Thinking...'; redraw();
+    const n0 = XG.n;
+    const r = await run_search(L.depth, think_time(L.ms), L.noise, d => { status = score_text(d); redraw(); });
+    thinking = 0;
+    if (r.discard || XG.n !== n0 || XG.over || !xq) return;
+    last = { depth: r.depth, nodes: r.nodes, ms: r.ms, score: r.score };
+    m = r.best || XG.legal[0];
+    xcpu_score = r.score;
+  }
+  xq_do_move(m);
+}
+async function xq_hint() {
+  if (XG.over || !XG.legal.length || thinking) return;
+  thinking = 1; status = 'Thinking...'; redraw();
+  const n0 = XG.n;
+  const r = await run_search(40, 1500, 0);
+  thinking = 0;
+  if (r.discard || XG.n !== n0 || !r.best || !xq) return;
+  xhint_from = X.XFROM(r.best); xhint_to = X.XTO(r.best);
+  status = 'Hint: ' + X.xq_move_to_wxf(XCUR(), r.best);
+}
+
+function xq_move_cursor(dx, dy) {
+  if (cfg.flip) { dx = -dx; dy = -dy; }
+  xcur = X.XSQ((X.XFILE(xcur) + dx + 9) % 9, (X.XRANK(xcur) + dy + 10) % 10);
+}
+function xq_select() {
+  if (XG.over || !is_human(XCUR().side) || thinking) return;
+  const pc = XCUR().b[xcur];
+  const mine = pc && X.XCOLOR(pc) === XCUR().side, has = XG.legal.some(m => X.XFROM(m) === xcur);
+  if (xsel < 0) { if (mine && has) xsel = xcur; else beep(220, 40); return; }
+  if (xcur === xsel) { xsel = -1; return; }
+  const m = XG.legal.find(m => X.XFROM(m) === xsel && X.XTO(m) === xcur);
+  if (m) { xq_do_move(m); return; }
+  if (mine && has) xsel = xcur; else beep(220, 40);
+}
+
+/* RESIGN (twice; Shift+Backspace at once) and DRAW, as chess's */
+function xq_resign(now_) {
+  if (XG.over) { status = 'Game over'; return; }
+  if (cfg.mode === MODE_CC) { status = 'Demo: NEW or MODE'; return; }
+  if (!now_ && confirm !== 'R') { confirm = 'R'; status = 'Resign? RESIGN again'; return; }
+  confirm = '';
+  if (thinking) move_now_discard();
+  xresigner = cfg.mode === MODE_HC ? cfg.human : XCUR().side;
+  XG.over = 7; clk_live = 0; beep(330, 300); save_auto();
+}
+function xq_draw_offer() {
+  if (XG.over) { status = 'Game over'; return; }
+  if (cfg.mode === MODE_CC) { status = 'Demo: no draw'; return; }
+  if (cfg.mode === MODE_HH) {
+    if (offer === (XCUR().side ^ 1)) {
+      if (confirm !== 'A') { confirm = 'A'; status = 'Draw? ACCEPT again'; return; }
+      confirm = ''; offer = -1; XG.over = 8; clk_live = 0; beep(660, 250); save_auto(); return;
+    }
+    if (offer === XCUR().side) { status = 'Offered: now move'; return; }
+    offer = XCUR().side; status = (offer ? 'Black' : 'Red') + ' offers a draw';
+    return;
+  }
+  /* the CPU accepts when it is worse (its last score -30 or less), or from move 20 when it is not better */
+  if (!(xcpu_score <= -30 || (xcpu_score <= 0 && XG.n >= 40))) { status = 'CPU declines the draw'; beep(220, 80); return; }
+  if (thinking) move_now_discard();
+  XG.over = 8; clk_live = 0; beep(660, 250); save_auto();
+}
+
+function xq_softkey(fn) {
+  const k = cfg.page * 6 + fn;
+  if (!((k === 9 && confirm === 'R') || (k === 10 && confirm === 'A'))) confirm = '';
+  if (fn === 5) { cfg.page = (cfg.page + 1) % 3; store.set('cfg', cfg); return; }
+  if (thinking && !(k === 0 || k === 9 || k === 10 || k === 6 || k === 12)) { status = 'Thinking... (Esc: move now)'; return; }
+  switch (k) {
+  case 0: if (thinking) move_now_discard(); xq_new_game(); break;
+  case 1: cfg.level = (cfg.level + 1) % 10; status = 'Level ' + LEVELS[cfg.level].name; break;
+  case 2: cfg.flip ^= 1; break;
+  case 3: xq_undo(); break;
+  case 4: xq_hint(); break;
+  case 6: piece_style(); break;
+  case 7: cfg.tc = (cfg.tc + 1) % TCS.length; clock_reset(); clock_update_live(); status = 'Clock ' + TCS[cfg.tc].name; break;
+  case 8: cfg.human ^= 1; cfg.flip = cfg.human; if (cfg.mode !== MODE_HC) cfg.mode = MODE_HC; xsel = -1;
+          status = 'You play ' + (cfg.human ? 'Black' : 'Red'); break;
+  case 9: xq_resign(0); break;
+  case 10: xq_draw_offer(); break;
+  case 12: game_switch(); break;
+  case 13: cfg.mode = (cfg.mode + 1) % MODE_CNT; xsel = -1; status = MODE_NAME[cfg.mode]; break;
+  case 14: status = copy(X.xq_to_fen(XCUR())) ? 'FEN copied' : 'FEN: see the console'; console.log(X.xq_to_fen(XCUR())); break;
+  }
+  store.set('cfg', cfg);
+}
+function xq_key(k) {
+  status = thinking ? status : '';
+  switch (k) {
+  case 'ArrowUp': case '8': xq_move_cursor(0, 1); break;
+  case 'ArrowDown': case '2': xq_move_cursor(0, -1); break;
+  case 'ArrowLeft': case '4': xq_move_cursor(-1, 0); break;
+  case 'ArrowRight': case '6': xq_move_cursor(1, 0); break;
+  case '7': xq_move_cursor(-1, 1); break;
+  case '9': xq_move_cursor(1, 1); break;
+  case '1': xq_move_cursor(-1, -1); break;
+  case '3': xq_move_cursor(1, -1); break;
+  case '5': case 'Enter': case ' ': xq_select(); break;
+  case 'Escape': if (thinking) move_now(); xsel = xhint_from = xhint_to = -1; break;
+  case 'Backspace': xq_undo(); break;
+  }
+}
+
+function xq_serialize() {
+  if (!XG.hist.length) return null;
+  return { start: XG.start, moves: XG.moves.slice(0, XG.n).map(m => X.xq_move_to_str(m, 1)),
+           over: XG.over === 7 || XG.over === 8 ? XG.over : 0, resigner: xresigner };
+}
+function xq_deserialize(s) {
+  if (!s || !s.start || !xq_new_game_from(s.start)) return 0;
+  for (const u of s.moves) { const m = X.xq_str_to_move(XCUR(), u); if (!m) break; xq_do_move(m); }
+  if (s.over) { XG.over = s.over; xresigner = s.resigner ?? -1; clk_live = 0; }
+  status = '';
+  return 1;
+}
+
+/* ---- the games' menu (SHIFT) ---- */
+function game_switch() {                                  /* chess <-> Xiangqi, each keeps its game */
+  if (thinking) move_now_discard();
+  xq ^= 1; cfg.game = xq ? 'xq' : 'chess';
+  offer = -1; confirm = '';
+  if (xq && !XG.hist.length && !xq_deserialize(store.get('xq'))) xq_new_game_from(XQ_START);
+  if (!xq) refresh_legal();
+  clock_reset(); clock_update_live();
+  worker_call({ cmd: 'newgame' });
+  status = xq ? 'Xiangqi' : 'Chess';
+  save_auto();
+}
+function piece_style() {
+  if (xq) { cfg.xstyle = (cfg.xstyle + 1) % 3; status = XQ_STYLE[cfg.xstyle]; }
+  else { cfg.pstyle ^= 1; status = cfg.pstyle ? 'Pieces: letters' : 'Pieces: figures'; }
+  store.set('cfg', cfg);
+}
+function zoom_toggle() { cfg.zoom ^= 1; status = cfg.zoom ? 'Zoom: +/- back' : 'Normal view'; store.set('cfg', cfg); }
+function game_menu(fn) {
+  shift = 0;
+  if (!(fn === 3 && confirm === 'R') && !(fn === 4 && confirm === 'A')) confirm = '';
+  switch (fn) {
+  case 0: game_switch(); break;
+  case 1: piece_style(); break;
+  case 2: zoom_toggle(); break;
+  case 3: if (xq) xq_resign(0); else resign(0); break;
+  case 4: if (xq) xq_draw_offer(); else draw(); break;
+  }
+}
+
+/* ---- Xiangqi's drawing ---- */
+const xpx = f => XB0 + (cfg.flip ? 8 - f : f) * XGAP;
+const xpy = r => XY0 + (cfg.flip ? r : 9 - r) * XGAP;
+function xline(x0, y0, x1, y1) {                          /* horizontal, vertical or 45 degrees */
+  const dx = Math.sign(x1 - x0), dy = Math.sign(y1 - y0);
+  if (!dy) { fill(Math.min(x0, x1), y0, Math.abs(x1 - x0) + 1, 1, 1); return; }
+  if (!dx) { fill(x0, Math.min(y0, y1), 1, Math.abs(y1 - y0) + 1, 1); return; }
+  for (let x = x0, y = y0; ; x += dx, y += dy) { fill(x, y, 1, 1, 1); if (x === x1) break; }
+}
+function xq_grid() {
+  for (let r = 0; r < 10; r++) xline(xpx(0), xpy(r), xpx(8), xpy(r));
+  for (let f = 0; f < 9; f++) {
+    if (f === 0 || f === 8) xline(xpx(f), xpy(0), xpx(f), xpy(9));
+    else { xline(xpx(f), xpy(0), xpx(f), xpy(4)); xline(xpx(f), xpy(5), xpx(f), xpy(9)); }
+  }
+  for (const r0 of [0, 7]) { xline(xpx(3), xpy(r0), xpx(5), xpy(r0 + 2)); xline(xpx(5), xpy(r0), xpx(3), xpy(r0 + 2)); }
+  const ym = ((xpy(4) + xpy(5)) >> 1) - 7, step = cfg.zoom ? 22 : 19;   /* the river: 楚河 漢界 */
+  for (let k = 0; k < 4; k++) {
+    const x0 = XB0 + (k < 2 ? 2 : 6) * XGAP - ((step + 15) >> 1) + (k & 1) * step;
+    for (let y = 0; y < 15; y++) for (let x = 0; x < 15; x++) if (XB.river[k][y] >> (15 - x) & 1) fill(x0 + x, ym + y, 1, 1, 1);
+  }
+}
+function xq_piece(pc, cx, cy, inv) {
+  const n = XPS, bm = (cfg.zoom ? XB.pieces : XB.piecesN)[cfg.xstyle][X.XCOLOR(pc)][X.XTYPE(pc) - 1];
+  const disc = cfg.zoom ? XB.disc : XB.discN, x0 = cx - (n >> 1), y0 = cy - (n >> 1);
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++)
+      if (disc[y] >> (23 - x) & 1) fill(x0 + x, y0 + y, 1, 1, (bm[y] >> (23 - x) & 1) ^ inv);
+}
+function xq_frame(cx, cy, r) {
+  fill(cx - r, cy - r, 2 * r + 1, 1, 1); fill(cx - r, cy + r, 2 * r + 1, 1, 1);
+  fill(cx - r, cy - r, 1, 2 * r + 1, 1); fill(cx + r, cy - r, 1, 2 * r + 1, 1);
+}
+/* four corners: they stay in the gap between the pieces, so nothing next to it is drawn over */
+function xq_corners(cx, cy, r, len, w) {
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+    const x = sx < 0 ? cx - r : cx + r - w + 1, y = sy < 0 ? cy - r : cy + r - w + 1;
+    fill(sx < 0 ? x : cx + r - len + 1, y, len, w, 1);
+    fill(x, sy < 0 ? y : cy + r - len + 1, w, len, 1);
+  }
+}
+function xq_draw_board() {
+  xq_grid();
+  const tg = new Set(xsel >= 0 ? XG.legal.filter(m => X.XFROM(m) === xsel).map(m => X.XTO(m)) : []);
+  for (let r = 0; r < 10; r++)
+    for (let f = 0; f < 9; f++) {
+      const s = X.XSQ(f, r), pc = XCUR().b[s], cx = xpx(f), cy = xpy(r);
+      if (pc) xq_piece(pc, cx, cy, s === xsel ? 1 : 0);
+      if (tg.has(s)) { if (pc) xq_frame(cx, cy, XR); else fill(cx - 2, cy - 2, 5, 5, 1); }
+      if (s === xlast_from || s === xlast_to || s === xhint_from || s === xhint_to) xq_corners(cx, cy, XR, 4, 1);
+      if (s === xcur && !thinking && is_human(XCUR().side) && !XG.over) xq_corners(cx, cy, XR, cfg.zoom ? 7 : 6, 2);
+    }
+}
+function xq_draw_panel() {
+  const h = LH;
+  if (!cfg.tc) ptext(2, 1, 'XIANGQI 47', 1);
+  else {
+    const stm = XCUR().side;
+    ptext(0, 1, ' R ' + fmt_clock(clock_left(0)) + ' ', stm === 0 && !XG.over);
+    ptext((XPANEL >> 1) + 2, 1, ' B ' + fmt_clock(clock_left(1)) + ' ', stm === 1 && !XG.over);
+    fill(XPANEL >> 1, 0, 1, h + 2, 1);
+  }
+  let y = h + 4;
+  const lv = cfg.level ? 'L' + LEVELS[cfg.level].name : LEVELS[cfg.level].name;
+  ptext(2, y, cfg.mode === MODE_HH ? '2 players' : cfg.mode === MODE_CC ? 'Demo  ' + lv : `${lv}  You:${cfg.human ? 'Black' : 'Red'}`, 0);
+  y += h;
+  let s, inv = 0;
+  if (XG.over) { s = xq_result(XG.over); inv = 1; }
+  else if (X.xq_in_check(XCUR())) { s = 'CHECK! ' + (XCUR().side ? 'Black' : 'Red'); inv = 1; }
+  else if (status) s = status;
+  else if (cfg.mode === MODE_HH && offer === (XCUR().side ^ 1)) s = (offer ? 'Black' : 'Red') + ' offers a draw';
+  else s = (XCUR().side ? 'Black' : 'Red') + ' to move';
+  ptext(2, y, s, inv);
+  y += h + 2;
+  fill(2, y, XPANEL - 4, 1, 1);
+  y += 3;
+  if (xseven) {                                           /* the Seven Stars: its name, 七星聚會 */
+    for (let k = 0; k < 4; k++) for (let yy = 0; yy < 15; yy++) for (let x = 0; x < 15; x++)
+      if (XB.seven[k][yy] >> (15 - x) & 1) fill(4 + k * 18 + x, y + 1 + yy, 1, 1, 1);
+    y += 18;
+  }
+  const bottom = cfg.zoom ? LCD_Y - 2 : MENU_Y - 2, lines = Math.max(1, Math.floor((bottom - y) / h));
+  const total = (XG.n + 1) >> 1, first = Math.max(0, total - lines);
+  for (let ln = first; ln < total; ln++) {
+    ptext(2, y, (ln + 1) + '.', 0); ptext(40, y, XG.wxf[2 * ln], 0);
+    if (2 * ln + 1 < XG.n) ptext(112, y, XG.wxf[2 * ln + 1], 0);
+    y += h;
+  }
+}
+
 /* ---- drawing: the pixel layer at 400 x 240, then the text at S times ---- */
 const canvas = document.getElementById('lcd');
 canvas.width = LCD_X * S; canvas.height = LCD_Y * S;
@@ -1371,9 +2340,16 @@ function fill(x, y, w, h, v) {
   for (let j = Math.max(0, y); j < Math.min(LCD_Y, y + h); j++) lcd.fill(v, j * LCD_X + Math.max(0, x), j * LCD_X + Math.min(LCD_X, x + w));
 }
 function bmp_at(b, w, h, x, y) { if (x < 0 || y < 0 || x >= w || y >= h) return 0; const c = b[y][x]; return c === '#' ? 1 : c === '+' ? 2 : 0; }
+/* a piece's pixel at (x, y) of its 20 px glyph: -1 transparent, 0 white, 1 black (src/main.c's piece_px) */
 function piece_px(pc, x, y) {
-  const b = BMP.pieces[PTYPE(pc)], W = 20, H = 20;
+  const b = cfg.pstyle ? BMP.letters[PTYPE(pc)] : BMP.pieces[PTYPE(pc)], W = 20, H = 20;
   const v = bmp_at(b, W, H, x, y);
+  if (cfg.pstyle) {                                       /* letters: White solid (a white halo), Black white in a black box */
+    if (PCOLOR(pc) === BLACK) return x >= 2 && x <= 17 && y >= 3 && y <= 18 ? (v ? 0 : 1) : -1;
+    if (v) return 1;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (bmp_at(b, W, H, x + dx, y + dy)) return 0;
+    return -1;
+  }
   if (!v) {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (bmp_at(b, W, H, x + dx, y + dy)) return 0;
     return -1;
@@ -1398,14 +2374,17 @@ function is_target(sq) {
 function draw_square(sq) {
   const p = CUR(), x0 = sq_x(sq), y0 = sq_y(sq);
   const dark = !((FILE_OF(sq) + RANK_OF(sq)) & 1), pc = p.b[sq], target = is_target(sq);
-  const ox = (SQPX - 20) >> 1, oy = ((SQPX - 20) >> 1) + 1;
+  const g = GLYPH, ox = (SQPX - g) >> 1, oy = ((SQPX - g) >> 1) + 1, Ed = SQPX - 1, C = SQPX >> 1;
   for (let y = 0; y < SQPX; y++) for (let x = 0; x < SQPX; x++) {
     let v = dark ? (((x + y) & 1) === 0 && (y & 1) === 0 ? 1 : 0) : 0;
-    if (pc) { const q = piece_px(pc, x - ox, y - oy); if (q >= 0) v = q; }
+    if (pc) {                                             /* the glyph scaled to g px (nearest pixel) */
+      const gx = x - ox < 0 ? -1 : Math.floor((x - ox) * 20 / g), gy = y - oy < 0 ? -1 : Math.floor((y - oy) * 20 / g);
+      const q = piece_px(pc, gx, gy); if (q >= 0) v = q;
+    }
     if (target) {
-      if (!pc && x >= 11 && x <= 14 && y >= 11 && y <= 14) v = 1;
-      if (pc && ((x < 4 && y < 4 && x + y < 4) || (x > 21 && y < 4 && (25 - x) + y < 4) ||
-                 (x < 4 && y > 21 && x + (25 - y) < 4) || (x > 21 && y > 21 && (25 - x) + (25 - y) < 4))) v = 1;
+      if (!pc && x >= C - 2 && x <= C + 1 && y >= C - 2 && y <= C + 1) v = 1;
+      if (pc && ((x < 4 && y < 4 && x + y < 4) || (x > Ed - 4 && y < 4 && (Ed - x) + y < 4) ||
+                 (x < 4 && y > Ed - 4 && x + (Ed - y) < 4) || (x > Ed - 4 && y > Ed - 4 && (Ed - x) + (Ed - y) < 4))) v = 1;
     }
     if ((sq === last_from || sq === last_to) && (x === 0 || y === 0 || x === SQPX - 1 || y === SQPX - 1)) v = 1;
     if ((sq === hint_from || sq === hint_to) && (x <= 1 || y <= 1 || x >= SQPX - 2 || y >= SQPX - 2) && ((x + y) & 2)) v = 1;
@@ -1421,7 +2400,7 @@ function draw_square(sq) {
 const texts = [];                                          /* [x, y, text, inverse, centred width] at 400 x 240 */
 function ptext(x, y, s, inv) {
   ctx.font = FONT;
-  while (s && x + ctx.measureText(s).width / S > BX - 2) s = s.slice(0, -1);
+  while (s && x + ctx.measureText(s).width / S > PANEL_EDGE) s = s.slice(0, -1);
   if (inv && s) fill(Math.max(0, x - 2), y, Math.ceil(ctx.measureText(s).width / S) + 4, LH, 1);
   texts.push([x, y, s, inv]);
 }
@@ -1478,10 +2457,16 @@ function draw_panel() {
   }
 }
 const menu_boxes = [];
+/* SHIFT: the game menu, the same in both games: the other game, the pieces' style, the zoom, RESIGN, DRAW */
+function game_menu_keys() {
+  const acc = cfg.mode === MODE_HH && offer === (side_now() ^ 1) && !over_now();
+  return [xq ? 'CHESS' : 'XIANGQI', 'PIECES', cfg.zoom ? 'NORMAL' : 'ZOOM', 'RESIGN', acc ? 'ACCEPT' : 'DRAW', ''];
+}
 function draw_menu() {
-  const keys = promo_mode ? PROMO_MENU : MENU[cfg.page].map((k, i) => cfg.page === 1 && i === 0 && G.c960 ? '960*' :
-    accept_pending() && ((cfg.page === 0 && i === 4) || (cfg.page === 1 && i === 4)) ? 'ACCEPT' : k);
   menu_boxes.length = 0;
+  if (cfg.zoom && !shift && !promo_mode) return;          /* zoom: the board the full height (the keys still work) */
+  const keys = shift && !promo_mode ? game_menu_keys() : xq ? XQ_MENU[cfg.page] : promo_mode ? PROMO_MENU : MENU[cfg.page].map((k, i) => cfg.page === 1 && i === 0 && G.c960 ? '960*' :
+    accept_pending() && ((cfg.page === 0 && i === 4) || (cfg.page === 1 && i === 4)) ? 'ACCEPT' : k);
   const w = 64, gap = (LCD_X - 6 * w) / 5;
   for (let i = 0; i < 6; i++) {
     const x = Math.round(i * (w + gap));
@@ -1508,8 +2493,10 @@ function draw_info() {
 }
 
 function redraw() {
+  layout();
   lcd.fill(0); texts.length = 0;
   if (info_screen) draw_info();
+  else if (xq) { xq_draw_board(); xq_draw_panel(); }
   else {
     for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) draw_square(SQ(f, r));
     fill(BX - 1, BY, 1, BOARD_PX, 1);
@@ -1526,6 +2513,7 @@ function redraw() {
   ctx.font = FONT; ctx.textBaseline = 'top';
   for (const [x, y, s, inv, cw] of texts) {
     ctx.fillStyle = inv ? PAPER : INK;
+    ctx.font = cw && ctx.measureText(s).width > (cw - 4) * S ? FONT.replace(`${16 * S}px`, `${13 * S}px`) : FONT;   /* XIANGQI */
     const tx = cw ? (x + cw / 2) * S - ctx.measureText(s).width / 2 : x * S;
     ctx.fillText(s, tx, (y + 2) * S);
   }
@@ -1534,18 +2522,39 @@ function redraw() {
 /* ---- input ---- */
 document.addEventListener('keydown', ev => {
   if (document.querySelector('dialog[open]')) return;
+  if (ev.key === 'Shift') { shift_alone = 1; return; }
+  shift_alone = 0;
   const fk = /^F([1-6])$/.exec(ev.key);
-  if (fk) { ev.preventDefault(); softkey(+fk[1] - 1); }
+  if (ev.code === 'Digit7' && ev.shiftKey) { ev.preventDefault(); xq_seven(); }
+  else if (fk) { ev.preventDefault(); if (ev.shiftKey) shift = 1; softkey(+fk[1] - 1); }
   else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' ', 'Escape', 'Backspace',
-            '1', '2', '3', '4', '5', '6', '7', '8', '9', 'i'].includes(ev.key)) { ev.preventDefault(); key(ev.key, ev.shiftKey); }
+            '1', '2', '3', '4', '5', '6', '7', '8', '9', 'i', '*', 'x', '+', '-'].includes(ev.key)) { ev.preventDefault(); key(ev.key, ev.shiftKey); }
   else return;
   redraw(); tick_game();
 });
+/* Shift pressed and let go alone: the calculator's SHIFT, the game menu on the soft keys (again: off) */
+let shift_alone = 0;
+document.addEventListener('keyup', ev => {
+  if (ev.key !== 'Shift' || !shift_alone || document.querySelector('dialog[open]')) return;
+  shift_alone = 0; shift ^= 1; redraw();
+});
+document.getElementById('shift').addEventListener('click', () => { shift ^= 1; redraw(); });
 canvas.addEventListener('pointerdown', ev => {
   const r = canvas.getBoundingClientRect();
   const x = (ev.clientX - r.left) * LCD_X / r.width, y = (ev.clientY - r.top) * LCD_Y / r.height;
+  layout();
   if (info_screen) { info_screen = 0; }
-  else if (y >= MENU_Y) { menu_boxes.forEach((b, i) => { if (x >= b[0] && x < b[0] + b[2]) softkey(i); }); }
+  else if (y >= MENU_Y && menu_boxes.length) { menu_boxes.forEach((b, i) => { if (x >= b[0] && x < b[0] + b[2]) softkey(i); }); }
+  else if (xq) {
+    if (x >= XPANEL + 2) {                                /* the nearest point */
+      let f = Math.round((x - XB0) / XGAP), rk = 9 - Math.round((y - XY0) / XGAP);
+      f = Math.max(0, Math.min(8, f)); rk = Math.max(0, Math.min(9, rk));
+      if (cfg.flip) { f = 8 - f; rk = 9 - rk; }
+      xcur = X.XSQ(f, rk);
+      shift = 0;
+      xq_select();
+    }
+  }
   else if (x >= BX && y < BOARD_PX) {
     let f = Math.floor((x - BX) / SQPX), rk = 7 - Math.floor(y / SQPX);
     if (cfg.flip) { f = 7 - f; rk = 7 - rk; }
@@ -1562,6 +2571,14 @@ document.getElementById('calc').addEventListener('change', ev => { cfg.calc = ev
 /* ---- the game loop: the CPU's moves, the demo, the clock ---- */
 let busy = 0;
 async function tick_game() {
+  if (xq) {
+    if (busy || thinking || XG.over || info_screen || !XG.legal.length || is_human(XCUR().side)) return;
+    busy = 1;
+    try { await xq_cpu_move(); } finally { busy = 0; }
+    redraw();
+    if (cfg.mode === MODE_CC) setTimeout(tick_game, 400); else tick_game();
+    return;
+  }
   if (busy || thinking || G.over || promo_mode || info_screen) return;
   if (is_human(CUR().side) || !G.legal.length) return;
   busy = 1;
@@ -1570,14 +2587,18 @@ async function tick_game() {
   if (cfg.mode === MODE_CC) setTimeout(tick_game, 400); else tick_game();
 }
 setInterval(() => {
-  if (clk_live && !G.over) {
-    if (clock_left(CUR().side) <= 0) { clk[CUR().side] = 0; G.over = 6; clk_live = 0; beep(330, 400); if (thinking) move_now(); }
+  if (clk_live && !over_now()) {
+    const sd = side_now();
+    if (clock_left(sd) <= 0) { clk[sd] = 0; if (xq) XG.over = 6; else G.over = 6; clk_live = 0; beep(330, 400); if (thinking) move_now(); }
     redraw();
   }
 }, 250);
 
 /* ---- start: the last game resumed ---- */
+const start_xq = xq;
+xq = 0;                                                   /* chess's game first (it is always there) */
 if (!deserialize(store.get('auto'))) new_game(-1); else status = G.n ? 'Game resumed' : '';
+if (start_xq) { xq = 1; if (!xq_deserialize(store.get('xq'))) xq_new_game_from(XQ_START); else status = XG.n ? 'Game resumed' : ''; }
 redraw();
 tick_game();
 })();

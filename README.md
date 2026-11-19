@@ -25,6 +25,40 @@ To return to Free42: in Chess 47 press **SHIFT 0 (SETUP) → System**, or use
 > DMCP5 holds one program at a time, so loading Chess 47 replaces Free42 until you
 > load the DM42 program again. Your state files on the disk are not touched.
 
+## Xiangqi (Chinese chess), experimental
+
+**SHIFT** opens the game menu, the same in both games: **F1 XIANGQI / CHESS** switches games (each keeps its
+own), **F2 PIECES** the pieces' style, **F3 ZOOM**, **F4 RESIGN**, **F5 DRAW**. Xiangqi has the same search as chess
+(the shared `src/search.inc`), the same levels, clock and modes (you vs CPU, 2 players, CPU vs CPU), soft keys and
+zoom; moves in WXF notation (C2=5, H8+7). The pieces (**×** or SHIFT F2): the traditional characters (Red
+帥仕相傌俥炮兵, Black 將士象馬車砲卒, from Noto Sans CJK, thinned to one-pixel strokes), symbols (crown, shield,
+elephant, horse, chariot, cannon, soldier: Red grey, a dithered fill, Black white on the disc), or the WXF letters
+K A E H R C P. In chess, **×** shows the pieces as letters.
+
+| Normal (soft keys) | Zoom (+ / −) |
+|---|---|
+| ![Xiangqi](docs/xiangqi_characters.png) | ![zoom](docs/xiangqi_zoom.png) |
+| ![symbols](docs/xiangqi_symbols.png) | ![SHIFT: the game menu](docs/xiangqi_menu.png) |
+
+Soft keys in Xiangqi: page 1 NEW LEVEL FLIP UNDO HINT, page 2 PIECES CLOCK SIDE, page 3 CHESS MODE INFO.
+
+**SHIFT 7** (七, seven) sets up **七星聚會, the Seven Stars Gathering**: the "king of the endgames", the most famous of
+the four great classical compositions (江湖四大名局), as 竹香齋 printed it in 1801. Each side has seven pieces, and
+Red moves first. It looks like an easy win for Red, but one wrong move and Black mates. With the best play it is a
+draw. The famous line starts 炮二平四 卒5平6 兵四進一 將6進1 俥三進八 (C2=4 P5=6 P4+1 K6+1 R3+8).
+
+![Seven Stars](docs/xiangqi_seven.png)
+
+- The rules: palace, river, the horse's leg and the elephant's eye, the cannon's screen, the facing generals; no
+  legal move loses (stalemate too); repetition is a draw (the real perpetual check / chase rules are not modelled);
+  60 moves without a capture a draw.
+- Checked: perft from the start = the published counts (44, 1 920, 79 666, 3 290 240, 133 312 995), and perft and
+  WXF on 120 random positions = Fairy-Stockfish (`make xq-test`, with pyffish: on Arch in a venv,
+  `python -m venv ~/opt/venv-xq && ~/opt/venv-xq/bin/pip install pyffish`, then `make xq-test PYTHON=~/opt/venv-xq/bin/python`;
+  or without Python modules, perft only, against Pikafish: `make xq-test XQ_ENGINE=~/opt/Pikafish/src/pikafish`).
+- Not yet: Xiangqi over USB (Pikafish, Pychess), SAVE / LOAD; the strength not measured (Pikafish matches to come).
+- The pieces are made by `tools/xq_pieces.py` (Pillow, Noto Sans CJK, DejaVu Sans) into `src/xq_pieces.h`.
+
 ## Keys
 
 | Key | Action |
@@ -36,6 +70,8 @@ To return to Free42: in Chess 47 press **SHIFT 0 (SETUP) → System**, or use
 | **←** (backspace) | take back (two plies vs the CPU) |
 | **F1…F6** | soft keys (3 pages, `>>` switches page) |
 | **+** or **−** | zoom: the board the full screen height (30 px squares), the soft keys hidden (they still work); again: the normal view |
+| **SHIFT** | the game menu on the soft keys (also in the zoom): F1 XIANGQI / CHESS, F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW; **SHIFT 7** the Seven Stars (Xiangqi) |
+| **×** | the pieces: figures / letters (Xiangqi: characters / symbols / letters) |
 | **SHIFT EXIT** | power off. The game is autosaved and resumed at power on |
 | **SHIFT 0** | setup: time/date, beep, USB disk, **System**, About |
 | **SHIFT ←** | resign at once |
@@ -238,22 +274,24 @@ python3 tools/dm42view.py --png shots/    # and a PNG of every screen
 
 ## In the browser (web/chess47.html)
 
-`web/chess47.html` is Chess 47 in one file for any browser, phone included, offline too: the same screen,
-soft keys and levels, and the engine of `src/engine.c` ported line for line to JavaScript (`web/engine.js`, in a
-Web Worker so the page stays responsive). Click or tap a piece, then its square; F1-F6 and the keypad keys work
+`web/chess47.html` is Chess 47 in one file for any browser, phone included, offline too: chess and Xiangqi, the
+same screen, soft keys, levels, piece styles, zoom and SHIFT game menu (Shift pressed alone, or the SHIFT button),
+and the engines of `src/engine.c` and `src/xq_engine.c` ported line for line to JavaScript (`web/engine.js`,
+`web/xq_engine.js`, in a Web Worker so the page stays responsive). SHIFT 7 (or Shift+7) the Seven Stars. Click or tap a piece, then its square; F1-F6 and the keypad keys work
 as on the calculator. With **DM42n speed** (on by default) the engine searches as many positions as the DM42n on
 USB power would in the same time, so the levels keep the calculator's strength; off, it uses the computer's
 full speed. The game is kept in the browser and resumed; PGN downloads the game, FEN copies the position.
 Chess960 and its number 1701 work too.
 
-![web](docs/web.png)
+![web](docs/web.png) ![web: Xiangqi](docs/web_xiangqi.png)
 
 The port is checked against the C: `test/test_web.js` compares perft counts, Zobrist keys, FEN, and fixed-depth
 searches (best move, score, node count, with the weak levels' root noise) with `test/jscheck.c`:
 
 ```bash
 gcc -O2 -o build/jscheck test/jscheck.c src/engine.c && node test/test_web.js
-python3 tools/build_web.py      # web/app.html + engine.js + app.js + src/pieces.h -> web/chess47.html
+gcc -O2 -o build/xq_jscheck test/xq_jscheck.c src/engine.c src/xq_engine.c && node test/test_web_xq.js
+python3 tools/build_web.py      # web/app.html + the engines + app.js + the bitmaps -> web/chess47.html
 ```
 
 ## Build

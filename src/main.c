@@ -19,6 +19,7 @@
 #include "usbview.h"
 #include "usbser.h"
 #include "pieces.h"
+#include "letters.h"
 
 /* ------------------------------------------------------------------ */
 /*  Layout                                                            */
@@ -151,9 +152,17 @@ static void fmt_clock(int32_t ms, char *s) {
   else sprintf(s, "%d:%02d", t / 60, t % 60);
 }
 
+/* Xiangqi (src/xq_ui.c, SHIFT F1): the clock, the computer's turn and the screen follow the game being played */
+static int xq;
+static int xq_side(void);
+static int xq_over_n(int *n);
+static void xq_draw_clock(void);
+static void xq_redraw(void);
+static int side_now(void) { return xq ? xq_side() : CUR->side; }
+
 static int32_t clock_left(int side) {
   int32_t c = clk[side];
-  if (clk_live && CUR->side == side) c -= (int32_t)(now_ms() - turn_start);
+  if (clk_live && side_now() == side) c -= (int32_t)(now_ms() - turn_start);
   return c;
 }
 
@@ -181,10 +190,21 @@ static int bmp_at(const char * const *bmp, int w, int h, int x, int y) {
   return c == '#' ? 1 : c == '+' ? 2 : 0;
 }
 
+/* the key x: the pieces as figures (0) or letters (1) */
+static int8_t pstyle;
+
 /* pixel value of a piece glyph at (x,y) in glyph space: -1 transparent, 0 white, 1 black */
 static int piece_px(int pc, int x, int y) {
-  const char * const *bmp = PIECE_BMP[PTYPE(pc)];
+  const char * const *bmp = pstyle ? LETTER_BMP[PTYPE(pc)] : PIECE_BMP[PTYPE(pc)];
   int v = bmp_at(bmp, PIECE_W, PIECE_H, x, y);
+  if (pstyle) {                                   /* letters: White solid (a white halo), Black white in a black box */
+    if (PCOLOR(pc) == BLACK) return (x >= 2 && x <= 17 && y >= 3 && y <= 18) ? !v : -1;
+    if (v) return 1;
+    for (int dy = -1; dy <= 1; dy++)
+      for (int dx = -1; dx <= 1; dx++)
+        if (bmp_at(bmp, PIECE_W, PIECE_H, x + dx, y + dy)) return 0;
+    return -1;
+  }
   if (!v) {
     for (int dy = -1; dy <= 1; dy++)
       for (int dx = -1; dx <= 1; dx++)
@@ -435,9 +455,13 @@ static void lcd_show(void) {
   lcd_refresh_wait();
 }
 
+static void game_menu(void);
+static void game_switch(void);
+
 static void draw_menu(void) {
-  if (zoom && !promo_mode) return;                      /* zoom: the board the full height (the keys still work) */
   if (promo_mode) { lcd_draw_menu_keys(PROMO_MENU); return; }   /* Queen Rook Bishop Knight ... Cancel */
+  if (shift) { game_menu(); return; }                   /* SHIFT: the game menu, on any page, also in the zoom */
+  if (zoom) return;                                     /* zoom: the board the full height (the keys still work) */
   const char *keys[6];
   for (int i = 0; i < 6; i++) keys[i] = MENU[cfg.page][i];
 
@@ -445,9 +469,6 @@ static void draw_menu(void) {
   if (cfg.page == 0 && VS_USB) {                       /* undo and hints are off vs USB: the game's own actions */
     keys[3] = G->n < 2 ? "ABORT" : "RESIGN";
     keys[4] = claim_ok ? "CLAIM" : draw_in ? "ACCEPT" : draw_out ? "DRAW*" : "DRAW";
-  } else if (cfg.page == 0 && shift) {                 /* SHIFT: the game's actions on F4 / F5 */
-    keys[3] = "RESIGN";
-    keys[4] = cfg.mode == MODE_HH && offer == (CUR->side ^ 1) ? "ACCEPT" : "DRAW";
   } else if (cfg.page == 0 && cfg.mode == MODE_HH && offer == (CUR->side ^ 1) && !G->over) {
     keys[4] = "ACCEPT";                                /* 2 players: the other side offered a draw */
   }
@@ -456,6 +477,7 @@ static void draw_menu(void) {
 }
 
 static void redraw(void) {
+  if (xq) { xq_redraw(); return; }
   lcd_clear_buf();
   draw_board();                                /* the result in the status line only: the board stays visible */
   draw_panel();
@@ -522,7 +544,8 @@ static void clock_reset(void) {
 }
 
 static void clock_update_live(void) {
-  int want = cfg.tc && !G->over && G->n > 0;
+  int n = G->n, over = xq ? xq_over_n(&n) : G->over;
+  int want = cfg.tc && !over && n > 0;
   if (want && !clk_live) turn_start = now_ms();
   clk_live = want;
 }
@@ -653,10 +676,10 @@ static int poll_cb(void) {
   }
   usbser_task();                                            /* the USB keeps answering the PC during the search */
   uint32_t t = now_ms();
-  if (clk_live && clock_left(CUR->side) <= 0) stop = 1;
+  if (clk_live && clock_left(side_now()) <= 0) stop = 1;
   if (t - last_draw > 500) {
     last_draw = t;
-    draw_clock();
+    if (xq) xq_draw_clock(); else draw_clock();
     lcd_refresh_lines(0, lh(t20) + 2); lcd_refresh_wait();
     reset_auto_off();
   }
@@ -690,7 +713,7 @@ static uint32_t think_time(uint32_t level_ms) {
     return (uint32_t)t;
   }
   if (!cfg.tc) return level_ms;
-  int32_t left = clock_left(CUR->side);
+  int32_t left = clock_left(side_now());
   int32_t t = left / 25 + (int32_t)TCS[cfg.tc].inc_s * 750;
   if (t > left / 3) t = left / 3;
   if (t < 50) t = 50;
@@ -1105,6 +1128,25 @@ static const char *menu_line_str(uint8_t id, char *s, const int slen) {
   return id == MI_C47_ABOUT ? "About Chess 47 >" : NULL;
 }
 
+static void *heap_alloc(size_t n);
+#include "xq_ui.c"
+
+/* SHIFT: the game menu, the same in both games: F1 the other game, F2 the pieces' style, F3 the zoom,
+   F4 RESIGN, F5 DRAW (ACCEPT when the other side offered one); the soft keys show it while SHIFT is on */
+static void game_menu(void) {
+  const char *k[6] = { xq ? "CHESS" : "XIANGQI", "PIECES", zoom ? "NORMAL" : "ZOOM", "RESIGN", "DRAW", "" };
+  if (!xq && VS_USB) k[3] = k[4] = "";                 /* vs USB: F4 / F5 of page 1 */
+  else if (cfg.mode == MODE_HH && offer == (side_now() ^ 1) && !(xq ? XG->over : G->over)) k[4] = "ACCEPT";
+  lcd_draw_menu_keys(k);
+}
+
+static void game_switch(void) {                         /* chess <-> Xiangqi, each keeps its game */
+  if (xq) { xq = 0; eng_clear_tt(); strcpy(status, "Chess"); refresh_legal(); }
+  else if (xq_enter()) { xq = 1; strcpy(status, "Xiangqi"); }
+  offer = -1;
+  clock_reset(); clock_update_live();
+}
+
 /* ------------------------------------------------------------------ */
 /*  Input                                                             */
 /* ------------------------------------------------------------------ */
@@ -1278,8 +1320,8 @@ static void handle_softkey(int k) {
 
 static void handle_key(int key) {
   if (key == KEY_SHIFT) { shift = !shift; return; }
-  if (!(cfg.page == 0 && ((key == KEY_F4 && confirm == 'R') || (key == KEY_F5 && confirm == 'A') ||
-                          (key == KEY_F1 && confirm == 'N'))))
+  if (!((key == KEY_F4 && confirm == 'R') || (key == KEY_F5 && confirm == 'A') ||
+         (cfg.page == 0 && key == KEY_F1 && confirm == 'N')))
     confirm = 0;                                   /* any other key: no resign / accept pending */
 
   if (num_mode) {
@@ -1308,20 +1350,40 @@ static void handle_key(int key) {
       wait_for_key_release(-1);
       return;
     case KEY_BSP: /* resign */
+      if (xq) { xq_resign(1); return; }
       if (VS_USB) { confirm = 'R'; usb_resign(); return; }   /* vs USB: the PC must know (one press: SHIFT is the care) */
       local_resign(1);
       return;
-    case KEY_F4: if (cfg.page == 0 && !VS_USB) { local_resign(0); return; } break;   /* SHIFT F4 RESIGN */
-    case KEY_F5: if (cfg.page == 0 && !VS_USB) { local_draw(); return; } break;      /* SHIFT F5 DRAW */
+    /* the game menu (game_menu), on any page */
+    case KEY_F1: game_switch(); return;                                 /* XIANGQI / CHESS */
+    case KEY_F2:                                                        /* PIECES */
+      if (xq) xq_style();
+      else { pstyle ^= 1; strcpy(status, pstyle ? "Pieces: letters" : "Pieces: figures"); }
+      return;
+    case KEY_F3: zoom ^= 1; strcpy(status, zoom ? "Zoom: +/- back" : "Normal view"); return;   /* ZOOM */
+    case KEY_F4:                                                        /* RESIGN */
+      if (xq) xq_resign(0); else if (!VS_USB) local_resign(0);
+      return;
+    case KEY_F5:                                                        /* DRAW / ACCEPT */
+      if (xq) xq_draw_offer(); else if (!VS_USB) local_draw();
+      return;
+    case KEY_F6: return;
+    case KEY_7:                                                         /* 七: the Seven Stars (Xiangqi) */
+      if (!xq) { if (!xq_enter()) return; xq = 1; offer = -1; clock_update_live(); }
+      xq_seven();
+      return;
     case KEY_SIGMA: show_info(); return;
     }
+    if (xq) return;                                                     /* the rest of SHIFT: chess only */
   }
+  if (xq) { xq_handle_key(key); return; }
 
   status[0] = 0;
   if (key >= KEY_F1 && key <= KEY_F6) { handle_softkey(key); return; }
   if (promo_mode) { if (key == KEY_EXIT) { promo_mode = 0; sel = NOSQ; } return; }
 
   switch (key) {
+  case KEY_MUL: pstyle ^= 1; strcpy(status, pstyle ? "Pieces: letters" : "Pieces: figures"); break;   /* x */
   case KEY_ADD: case KEY_SUB: zoom ^= 1; strcpy(status, zoom ? "Zoom: +/- back" : "Normal view"); break;   /* ZOOM */
   case KEY_UP:   case KEY_8: move_cursor(0, 1); break;
   case KEY_DOWN: case KEY_2: move_cursor(0, -1); break;
@@ -1467,8 +1529,13 @@ void program_main(void) {
       redraw();
       continue;
     }
-    if (cfg.usb && usb_poll()) { redraw(); continue; }        /* a line from the PC (vs USB: its move) */
-    if (cfg.mode != MODE_USB && !(cfg.mode == MODE_EUSB && (usb_hold || usb_side(CUR->side))) &&
+    if (cfg.usb && !xq && usb_poll()) { redraw(); continue; }
+    if (xq && !ST(STAT_PGM_END) && !ST(STAT_SUSPENDED) && key_empty() && xq_cpu_turn()) {
+      xq_cpu_move();
+      redraw();
+      continue;
+    }        /* a line from the PC (vs USB: its move) */
+    if (!xq && cfg.mode != MODE_USB && !(cfg.mode == MODE_EUSB && (usb_hold || usb_side(CUR->side))) &&
         !ST(STAT_PGM_END) && !ST(STAT_SUSPENDED) && !G->over && !is_human(CUR->side) &&
         !promo_mode && !num_mode && key_empty()) {
       cpu_move();
@@ -1487,7 +1554,7 @@ void program_main(void) {
     if (ST(STAT_PGM_END) || ST(STAT_SUSPENDED)) {
       if (!ST(STAT_SUSPENDED)) {
         /* going off: pause clock, autosave, draw off image */
-        if (clk_live) { clk[CUR->side] = clock_left(CUR->side); clk_live = 0; }
+        if (clk_live) { clk[side_now()] = clock_left(side_now()); clk_live = 0; }
         save_game(DIR "/AUTO.TXT");
         if (cfg.usb) { usbview_off(); usbser_stop(); cfg.usb = 0; }
         lcd_set_buf_cleared(0);
@@ -1521,11 +1588,13 @@ void program_main(void) {
       if (t - last_tick >= 250) {
         last_tick = t;
         reset_auto_off();
-        if (clock_left(CUR->side) <= 0) {
-          clk[CUR->side] = 0; G->over = 6; clk_live = 0; beep(330, 400);
+        if (clock_left(side_now()) <= 0) {
+          clk[side_now()] = 0;
+          if (xq) XG->over = 6; else G->over = 6;
+          clk_live = 0; beep(330, 400);
           redraw();
         } else {
-          draw_clock();
+          if (xq) xq_draw_clock(); else draw_clock();
           lcd_refresh_lines(0, lh(t20) + 2); lcd_refresh_wait();
         }
       }

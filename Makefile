@@ -14,6 +14,7 @@ endif
 
 BUILD_DIR = build
 PYTHON ?= python3
+XQ_ENGINE ?=
 
 ######################################
 # Sources
@@ -23,7 +24,7 @@ C_SOURCES  += dmcp/sys/pgm_syscalls.c
 ASM_SOURCES = dmcp/startup_pgm.s
 
 USB ?= sercon
-C_SOURCES += src/main.c src/engine.c
+C_SOURCES += src/main.c src/engine.c src/xq_engine.c
 ifeq ($(USB),sercon)
 # DMCP5 3.58's serial console (IFC 18): the moves on channel 2, the screen streamed by DMCP (no TinyUSB)
 C_SOURCES += src/sercon.c
@@ -94,6 +95,18 @@ $(BUILD_DIR):
 test: test/perft.c src/engine.c src/engine.h
 	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/perft test/perft.c src/engine.c && $(BUILD_DIR)/perft
 
+# Xiangqi: perft from the start (the published counts); against Fairy-Stockfish (pyffish: perft and WXF) or a UCI
+# engine (make xq-test XQ_ENGINE=~/opt/Pikafish/src/pikafish: perft) on 120
+# random positions against Fairy-Stockfish; the chess search unchanged by the shared search.inc (test/bench_chess.txt)
+xq-test:
+	mkdir -p $(BUILD_DIR)
+	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/xq_perft test/xq_perft.c src/engine.c src/xq_engine.c && $(BUILD_DIR)/xq_perft
+	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/xq_wxf test/xq_wxf.c src/engine.c src/xq_engine.c
+	gcc -std=gnu11 -O2 -Wall -o $(BUILD_DIR)/bench test/bench.c src/engine.c && $(BUILD_DIR)/bench > $(BUILD_DIR)/bench.txt \
+	  && diff $(BUILD_DIR)/bench.txt test/bench_chess.txt && echo "chess search unchanged"
+	XQ_ENGINE=$(XQ_ENGINE) $(PYTHON) test/xq_check.py 120
+.PHONY: xq-test
+
 # both .pg5 at once: build/<NAME>.pg5 (DMCP5 3.58's console) and build/tinyusb/<NAME>.pg5 (any DMCP5)
 both:
 	$(MAKE) USB=sercon
@@ -121,6 +134,6 @@ SIM_USB = $(if $(filter sercon,$(USB)),src/sercon.c test/sim/sercon_sim.c,\
 SIM_DEFS = $(if $(filter sercon,$(USB)),,-DSERCON_TINYUSB)
 sim:
 	mkdir -p $(BUILD_DIR)
-	gcc -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' -DCHESS47_SIM $(SIM_DEFS) \
-	    -Itest/sim -Isrc -Isrc/usb -o $(BUILD_DIR)/sim test/sim/sim.c src/main.c src/engine.c $(SIM_USB)
+	gcc -std=gnu11 -O2 -w '-D__packed=__attribute__((__packed__))' '-D__weak=__attribute__((weak))' -DCHESS47_SIM $(SIM_DEFS) \
+	    -Itest/sim -Isrc -Isrc/usb -o $(BUILD_DIR)/sim test/sim/sim.c src/main.c src/engine.c src/xq_engine.c $(SIM_USB)
 .PHONY: sim

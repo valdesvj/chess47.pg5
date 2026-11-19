@@ -9,6 +9,8 @@
  * src/xq_pieces.h: the traditional characters (Red 帥仕相傌俥炮兵, Black 將士象馬車砲卒), symbols (crown, shield,
  * elephant, horse, chariot, cannon, soldier: Red grey, Black white) or the WXF letters (x or SHIFT F2 PIECES).
  * The panel on the left: the clock, the level, the state, the moves in WXF notation.
+ * The Easter egg, SHIFT 7 (七, seven): 七星聚會, the Seven Stars Gathering, the king of the classical endgames
+ * (竹香齋 1801: each side seven pieces, Red to move; with the best play a draw).
  * Not yet for Xiangqi: the USB opponent, SAVE / LOAD / PGN (chess's game is kept while Xiangqi is played).
  */
 #include "xq_engine.h"
@@ -25,6 +27,7 @@ typedef struct {
 } XGame;
 static XGame *XG;
 static int8_t xstyle;                                   /* the key x: 0 characters, 1 symbols, 2 letters */
+static int8_t xseven;                                   /* the game started from the Seven Stars (SHIFT 7) */
 static int8_t xresigner = -1;                           /* the side that resigned (XG->over 7) */
 static int  xcpu_score;                                 /* the CPU's last search score, its own view (DRAW) */
 static int xcur, xsel = -1, xlast_from = -1, xlast_to = -1, xhint_from = -1, xhint_to = -1;
@@ -46,8 +49,8 @@ static int xq_over_n(int *n) { *n = XG->n; return XG->over; }
 
 static void xq_refresh_legal(void) { XG->nlegal = xq_gen_legal(&XG->cur, XG->legal); }
 
-static void xq_new_game(void) {
-  xq_pos_start(&XG->start);
+static void xq_new_game_at(const char *fen) {
+  if (!fen || !xq_from_fen(&XG->start, fen)) xq_pos_start(&XG->start);
   XG->cur = XG->start;
   XG->keys[0] = XG->cur.key;
   XG->n = XG->over = 0;
@@ -58,6 +61,17 @@ static void xq_new_game(void) {
   clock_reset();
   eng_clear_tt();
   xq_refresh_legal();
+  xseven = 0;
+}
+static void xq_new_game(void) { xq_new_game_at(0); }
+
+/* SHIFT 7: 七星聚會, as 竹香齋 sets it (the river-line soldier): Red 帥 e1, 俥 g1 h1, 炮 h3, 兵 d9 f8 i5; Black 將 f10,
+   車 e10, 象 e8, 卒 b3 e3 d2 f2. The famous line: 炮二平四 卒5平6 兵四進一 將6進1 俥三進八 ... */
+static void xq_seven(void) {
+  xq_new_game_at("4rk3/3P5/4bP3/9/9/8P/9/1p2p2C1/3p1p3/4K1RR1 w - - 0 1");
+  xseven = 1;
+  strcpy(status, "Seven Stars 1801");
+  beep(784, 120); beep(988, 120); beep(1175, 120); beep(1568, 300);
 }
 
 static int xq_enter(void) {                             /* 1: Xiangqi ready */
@@ -220,8 +234,16 @@ static void xq_draw_panel(void) {
   y += h + 2;
   lcd_fill_rect(2, y, XPANEL - 4, 1, 1);
   y += 3;
+  if (xseven) {                                         /* the Seven Stars: its name, 七星聚會 */
+    for (int k = 0; k < 4; k++)
+      for (int yy = 0; yy < XQ_RSIZE; yy++) {
+        int row = XQ_SEVEN[k][2 * yy] << 8 | XQ_SEVEN[k][2 * yy + 1];
+        for (int x = 0; x < XQ_RSIZE; x++) if (row >> (15 - x) & 1) lcd_fill_rect(4 + k * 18 + x, y + 1 + yy, 1, 1, 1);
+      }
+    y += XQ_RSIZE + 3;
+  }
   /* the moves, two a line (WXF), the last that fit */
-  int bottom = zoom ? LCD_Y - h - 2 : XBOT - 2, lines = (bottom - y) / h;
+  int bottom = XBOT - 2, lines = (bottom - y) / h;
   int total = (XG->n + 1) / 2, first = total - lines;
   if (first < 0) first = 0;
   for (int ln = first; ln < total; ln++) {
@@ -230,10 +252,6 @@ static void xq_draw_panel(void) {
     xptext(36, y, XG->wxf[2 * ln], 0);
     if (2 * ln + 1 < XG->n) xptext(108, y, XG->wxf[2 * ln + 1], 0);
     y += h;
-  }
-  if (zoom) {                                            /* zoom: no soft keys, a reminder of the page */
-    static const char *const PAGE[3] = { "NEW LVL FLIP UNDO", "PIECES CLOCK SIDE", "CHESS MODE INFO" };
-    xptext(2, LCD_Y - h, shift ? "SHIFT: game menu" : PAGE[cfg.page], 0);
   }
 }
 

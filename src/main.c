@@ -1368,6 +1368,10 @@ static void handle_key(int key) {
       if (xq) xq_draw_offer(); else if (!VS_USB) local_draw();
       return;
     case KEY_F6: return;
+    case KEY_7:                                                         /* 七: the Seven Stars (Xiangqi) */
+      if (!xq) { if (!xq_enter()) return; xq = 1; offer = -1; clock_update_live(); }
+      xq_seven();
+      return;
     case KEY_SIGMA: show_info(); return;
     }
     if (xq) return;                                                     /* the rest of SHIFT: chess only */

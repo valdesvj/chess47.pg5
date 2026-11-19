@@ -229,7 +229,7 @@ def main():
     # the river's words 楚河 漢界, 15 x 15 (2 bytes a row), thinned as the pieces
     out.append('#define XQ_RSIZE 15')
     out.append('static const uint8_t XQ_RIVER[4][30] = {')
-    for ch in '楚河漢界':
+    def g15(ch):
         im = glyph(ch, 120, 1.0, 5).resize((15, 15), Image.LANCZOS)
         b = []
         for y in range(15):
@@ -237,7 +237,14 @@ def main():
             for x in range(16):
                 v = v << 1 | (1 if x < 15 and im.getpixel((x, y)) < 128 else 0)
             b += [v >> 8, v & 255]
-        out.append('  { ' + ', '.join('0x%02x' % v for v in b) + ' },   /* %s */' % ch)
+        return '  { ' + ', '.join('0x%02x' % v for v in b) + ' },   /* %s */' % ch
+    for ch in '楚河漢界':
+        out.append(g15(ch))
+    out.append('};')
+    # the Easter egg's title (SHIFT 7): 七星聚會, the Seven Stars Gathering
+    out.append('static const uint8_t XQ_SEVEN[4][30] = {')
+    for ch in '七星聚會':
+        out.append(g15(ch))
     out.append('};')
     out += ['', '#endif', '']
     # the chess letters

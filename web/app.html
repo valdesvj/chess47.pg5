@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chess 47 web</title>
-<meta name="description" content="Chess 47, the SwissMicros DM42n chess program, in the browser: the same engine, screen and keys.">
+<title>Chess 47 web: chess and Xiangqi</title>
+<meta name="description" content="Chess 47, the SwissMicros DM42n chess and Xiangqi program, in the browser: the same engines, screen and keys.">
 <style>
   :root { --bg: #e9ebe4; --fg: #22261e; --muted: #5d6356; --body: #3a3d36; --key: #2b2e29; --lcd: #c7cdba; --accent: #8a6d1f; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #16171a; --fg: #e4e6df; --muted: #9aa092; --body: #2a2c30; --key: #101113; --accent: #d1b05a; } }
@@ -19,6 +19,7 @@
   .brand { color: #f2f2ee; font: 600 15px system-ui, sans-serif; letter-spacing: .04em; margin: 0 0 8px 4px; }
   canvas { display: block; width: 100%; height: auto; border-radius: 4px; background: var(--lcd); touch-action: manipulation; cursor: pointer; }
   .opts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+  .opts button { font: 600 13px system-ui, sans-serif; padding: 3px 12px; border-radius: 6px; border: none; background: #e8a33a; color: #1d1d1b; cursor: pointer; }
   .opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
   details { margin-top: 18px; }
   summary { cursor: pointer; font-weight: 600; }
@@ -36,19 +37,23 @@
 </head>
 <body>
 <main>
-  <header><h1>Chess 47 web</h1><span>the DM42n program, its engine line for line in JavaScript</span></header>
+  <header><h1>Chess 47 web</h1><span>chess and Xiangqi 象棋: the DM42n program, its engines line for line in JavaScript</span></header>
   <div class="calc">
     <p class="brand">SwissMicros</p>
     <canvas id="lcd" width="1200" height="720" aria-label="Chess 47 screen"></canvas>
   </div>
   <div class="opts">
+    <button id="shift" type="button" title="the game menu: XIANGQI / CHESS, PIECES, ZOOM, RESIGN, DRAW (or press Shift alone)">SHIFT</button>
     <label><input type="checkbox" id="calc" checked> DM42n speed (the calculator's strength; off: this computer's full speed)</label>
     <label><input type="checkbox" id="sound" checked> Sound</label>
   </div>
   <details>
     <summary>Keys</summary>
     <table>
+      <tr><td>SHIFT</td><td>the game menu on the soft keys (Shift pressed alone, or the SHIFT button): F1 XIANGQI / CHESS (each game is kept), F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW</td></tr>
       <tr><td>click / tap</td><td>pick a piece, then its square (castling: the king, then its rook)</td></tr>
+      <tr><td>* or x</td><td>the pieces: chess figures / letters; Xiangqi characters / symbols / letters</td></tr>
+      <tr><td>+ or -</td><td>zoom: the board the full height, no soft keys (they still work)</td></tr>
       <tr><td>F1 … F6</td><td>the soft keys under the screen (or click them); &gt;&gt; the next page</td></tr>
       <tr><td>8 2 4 6, arrows</td><td>the cursor; 7 9 1 3 diagonally</td></tr>
       <tr><td>5, Enter</td><td>pick / play at the cursor</td></tr>
@@ -59,6 +64,9 @@
         NEW in an unfinished game against the computer counts as resigning (NEW twice; NEW again for the next game)</td></tr>
       <tr><td>i</td><td>info: the engine's last search</td></tr>
     </table>
+    <p><strong>Xiangqi</strong> (Chinese chess, SHIFT F1): the same levels, clock and modes; moves in WXF notation
+    (C2=5, H8+7). Soft keys: NEW LEVEL FLIP UNDO HINT / PIECES CLOCK SIDE RESIGN DRAW / CHESS MODE FEN. No legal move
+    loses (stalemate too); repetition is a draw; 60 moves without a capture a draw. And SHIFT 7 (七, seven)…</p>
     <p>Levels CRAZY, 1-9 as on the calculator. With <em>DM42n speed</em> the engine searches as many positions as the
     DM42n on USB power would in the same time (about 19 000 a second), so the levels keep the calculator's strength
     (level 9 about 2480 against Stockfish). The game is kept in this browser and resumed.</p>

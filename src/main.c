@@ -455,9 +455,13 @@ static void lcd_show(void) {
   lcd_refresh_wait();
 }
 
+static void game_menu(void);
+static void game_switch(void);
+
 static void draw_menu(void) {
-  if (zoom && !promo_mode) return;                      /* zoom: the board the full height (the keys still work) */
   if (promo_mode) { lcd_draw_menu_keys(PROMO_MENU); return; }   /* Queen Rook Bishop Knight ... Cancel */
+  if (shift) { game_menu(); return; }                   /* SHIFT: the game menu, on any page, also in the zoom */
+  if (zoom) return;                                     /* zoom: the board the full height (the keys still work) */
   const char *keys[6];
   for (int i = 0; i < 6; i++) keys[i] = MENU[cfg.page][i];
 
@@ -465,9 +469,6 @@ static void draw_menu(void) {
   if (cfg.page == 0 && VS_USB) {                       /* undo and hints are off vs USB: the game's own actions */
     keys[3] = G->n < 2 ? "ABORT" : "RESIGN";
     keys[4] = claim_ok ? "CLAIM" : draw_in ? "ACCEPT" : draw_out ? "DRAW*" : "DRAW";
-  } else if (cfg.page == 0 && shift) {                 /* SHIFT: the game's actions on F4 / F5 */
-    keys[3] = "RESIGN";
-    keys[4] = cfg.mode == MODE_HH && offer == (CUR->side ^ 1) ? "ACCEPT" : "DRAW";
   } else if (cfg.page == 0 && cfg.mode == MODE_HH && offer == (CUR->side ^ 1) && !G->over) {
     keys[4] = "ACCEPT";                                /* 2 players: the other side offered a draw */
   }
@@ -1130,6 +1131,22 @@ static const char *menu_line_str(uint8_t id, char *s, const int slen) {
 static void *heap_alloc(size_t n);
 #include "xq_ui.c"
 
+/* SHIFT: the game menu, the same in both games: F1 the other game, F2 the pieces' style, F3 the zoom,
+   F4 RESIGN, F5 DRAW (ACCEPT when the other side offered one); the soft keys show it while SHIFT is on */
+static void game_menu(void) {
+  const char *k[6] = { xq ? "CHESS" : "XIANGQI", "PIECES", zoom ? "NORMAL" : "ZOOM", "RESIGN", "DRAW", "" };
+  if (!xq && VS_USB) k[3] = k[4] = "";                 /* vs USB: F4 / F5 of page 1 */
+  else if (cfg.mode == MODE_HH && offer == (side_now() ^ 1) && !(xq ? XG->over : G->over)) k[4] = "ACCEPT";
+  lcd_draw_menu_keys(k);
+}
+
+static void game_switch(void) {                         /* chess <-> Xiangqi, each keeps its game */
+  if (xq) { xq = 0; eng_clear_tt(); strcpy(status, "Chess"); refresh_legal(); }
+  else if (xq_enter()) { xq = 1; strcpy(status, "Xiangqi"); }
+  offer = -1;
+  clock_reset(); clock_update_live();
+}
+
 /* ------------------------------------------------------------------ */
 /*  Input                                                             */
 /* ------------------------------------------------------------------ */
@@ -1303,8 +1320,8 @@ static void handle_softkey(int k) {
 
 static void handle_key(int key) {
   if (key == KEY_SHIFT) { shift = !shift; return; }
-  if (!(cfg.page == 0 && ((key == KEY_F4 && confirm == 'R') || (key == KEY_F5 && confirm == 'A') ||
-                          (key == KEY_F1 && confirm == 'N'))))
+  if (!((key == KEY_F4 && confirm == 'R') || (key == KEY_F5 && confirm == 'A') ||
+         (cfg.page == 0 && key == KEY_F1 && confirm == 'N')))
     confirm = 0;                                   /* any other key: no resign / accept pending */
 
   if (num_mode) {
@@ -1333,17 +1350,25 @@ static void handle_key(int key) {
       wait_for_key_release(-1);
       return;
     case KEY_BSP: /* resign */
+      if (xq) { xq_resign(1); return; }
       if (VS_USB) { confirm = 'R'; usb_resign(); return; }   /* vs USB: the PC must know (one press: SHIFT is the care) */
       local_resign(1);
       return;
-    case KEY_F4: if (cfg.page == 0 && !VS_USB) { local_resign(0); return; } break;   /* SHIFT F4 RESIGN */
-    case KEY_F5: if (cfg.page == 0 && !VS_USB) { local_draw(); return; } break;      /* SHIFT F5 DRAW */
-    case KEY_SIGMA: show_info(); return;
-    case KEY_F1:                                                        /* SHIFT F1: chess <-> Xiangqi */
-      if (xq) { xq = 0; eng_clear_tt(); strcpy(status, "Chess"); refresh_legal(); }
-      else if (xq_enter()) { xq = 1; strcpy(status, "Xiangqi"); }
-      clock_reset(); clock_update_live();
+    /* the game menu (game_menu), on any page */
+    case KEY_F1: game_switch(); return;                                 /* XIANGQI / CHESS */
+    case KEY_F2:                                                        /* PIECES */
+      if (xq) xq_style();
+      else { pstyle ^= 1; strcpy(status, pstyle ? "Pieces: letters" : "Pieces: figures"); }
       return;
+    case KEY_F3: zoom ^= 1; strcpy(status, zoom ? "Zoom: +/- back" : "Normal view"); return;   /* ZOOM */
+    case KEY_F4:                                                        /* RESIGN */
+      if (xq) xq_resign(0); else if (!VS_USB) local_resign(0);
+      return;
+    case KEY_F5:                                                        /* DRAW / ACCEPT */
+      if (xq) xq_draw_offer(); else if (!VS_USB) local_draw();
+      return;
+    case KEY_F6: return;
+    case KEY_SIGMA: show_info(); return;
     }
     if (xq) return;                                                     /* the rest of SHIFT: chess only */
   }

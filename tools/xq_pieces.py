@@ -8,10 +8,13 @@ Black: a solid disc, white character (the screen has no colour).
 
 Needs Pillow and the font (Arch: noto-fonts-cjk; Debian: fonts-noto-cjk). (C) 2026 Victor Valdes, GPL-3.0-or-later."""
 import os, sys
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SIZE = 23                                   # the disc (pixels), the board's points 24 apart
+SIZES = (23, 19)                            # the discs (pixels): zoom (the points 24 apart), normal (21 apart)
+THIN = {(23, 0): 9, (23, 1): 5, (19, 0): 5, (19, 1): 3}   # the strokes' erosion (pixels at 8 times the size):
+                                            # [size, colour], Black's white strokes on the disc less
+RING = 1.4                                  # Red's ring (pixels)
 CHARS = {0: '帥仕相傌俥炮兵', 1: '將士象馬車砲卒'}  # Red, Black: general advisor elephant horse chariot cannon soldier
 FONTS = ['/usr/share/fonts/noto-cjk/NotoSansCJK-Black.ttc',            # Arch (heavier strokes: they read better at 23 px)
          '/usr/share/fonts/opentype/noto/NotoSansCJK-Black.ttc',      # Debian, Ubuntu
@@ -39,8 +42,9 @@ LETTER_FONTS = ['/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',                  # A
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf']      # Debian, Ubuntu
 
 
-def latin(px):
+def latin(px, bold=True):
     for f in LETTER_FONTS:
+        f = f if bold else f.replace('-Bold', '')
         if os.path.exists(f):
             return ImageFont.truetype(f, px)
     raise SystemExit('no DejaVu Sans Bold: pacman -S ttf-dejavu')
@@ -64,54 +68,87 @@ def font(px):
     raise SystemExit('no Noto Sans CJK Black: pacman -S noto-fonts-cjk')
 
 
-def disc_only(black, scale=4):
-    n = SIZE * scale
+def disc_only(black, S, scale=8):
+    n = S * scale
     im = Image.new('L', (n, n), 255)
     d = ImageDraw.Draw(im)
     d.ellipse([0, 0, n - 1, n - 1], fill=0)
     if not black:
-        w = int(scale * 1.6)
+        w = int(scale * RING)
         d.ellipse([w, w, n - 1 - w, n - 1 - w], fill=255)
     return im, d
 
 
-def to_bits(im):
-    small = im.resize((SIZE, SIZE), Image.LANCZOS)
-    return [[1 if small.getpixel((x, y)) < 128 else 0 for x in range(SIZE)] for y in range(SIZE)]
+def to_bits(im, S):
+    small = im.resize((S, S), Image.LANCZOS)
+    return [[1 if small.getpixel((x, y)) < 128 else 0 for x in range(S)] for y in range(S)]
 
 
-def piece_symbol(t, black):
-    im, d = disc_only(black, 1)
-    bm = [[1 if im.getpixel((x, y)) < 128 else 0 for x in range(SIZE)] for y in range(SIZE)]
-    art = [ART['CROWN'], ART['SHIELD'], ART['ELEPHANT'], chess_bitmap('KNIGHT'), chess_bitmap('ROOK'),
-           ART['CANNON'], chess_bitmap('PAWN')][t]
+def disc_mask(S):
+    m = Image.new('L', (S * 8, S * 8), 255)
+    ImageDraw.Draw(m).ellipse([0, 0, S * 8 - 1, S * 8 - 1], fill=0)
+    return to_bits(m, S)
+
+
+def scaled_mask(art, box, S, chars):
+    """art's pixels in chars as a mask box x box (drawn 8 times bigger and reduced: smooth at any size)"""
     h, w = len(art), max(len(r) for r in art)
-    sc = min(17 / w, 17 / h, 1.0)
-    hh, ww = int(h * sc), int(w * sc)
-    oy, ox = (SIZE - hh) // 2, (SIZE - ww) // 2
+    k = 8
+    im = Image.new('L', (w * k, h * k), 255)
+    d = ImageDraw.Draw(im)
+    for y, r in enumerate(art):
+        for x, c in enumerate(r):
+            if c in chars:
+                d.rectangle([x * k, y * k, x * k + k - 1, y * k + k - 1], fill=0)
+    sc = min(box / w, box / h)
+    ww, hh = max(1, round(w * sc)), max(1, round(h * sc))
+    small = im.resize((ww, hh), Image.LANCZOS)
+    out = [[0] * S for _ in range(S)]
+    oy, ox = (S - hh) // 2, (S - ww) // 2
     for y in range(hh):
         for x in range(ww):
-            r = art[int(y / sc)]
-            if int(x / sc) < len(r) and r[int(x / sc)] == '#':
-                bm[oy + y][ox + x] = 0 if black else 1
+            out[oy + y][ox + x] = 1 if small.getpixel((x, y)) < 128 else 0
+    return out
+
+
+def piece_symbol(t, black, S):
+    """the symbols in three tones: Red a grey figure (a 50 % checker, the screen's only grey) in a black outline on
+    the white disc, Black the white figure on the black disc"""
+    im, d = disc_only(black, S)
+    bm = to_bits(im, S)
+    art = [ART['CROWN'], ART['SHIELD'], ART['ELEPHANT'], chess_bitmap('KNIGHT'), chess_bitmap('ROOK'),
+           ART['CANNON'], chess_bitmap('PAWN')][t]
+    box = S - 5 if S > 20 else S - 4
+    shape = scaled_mask(art, box, S, '#+')
+    detail = scaled_mask(art, box, S, '+')
+    for y in range(S):
+        for x in range(S):
+            if not shape[y][x]:
+                continue
+            edge = any(not (0 <= y + dy < S and 0 <= x + dx < S and shape[y + dy][x + dx])
+                       for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+            if black:
+                bm[y][x] = 1 if detail[y][x] else 0
+            else:
+                bm[y][x] = 1 if edge or detail[y][x] else (x + y) & 1
     return bm
 
 
-def piece_letter(t, black):
-    im, d = disc_only(black)
-    n = SIZE * 4
-    ft = latin(int(n * 0.62))
+def piece_letter(t, black, S):
+    im, d = disc_only(black, S)
+    n = S * 8
+    ft = latin(int(n * 0.6), bold=black)
     ch = LETTERS[t] if not black else LETTERS[t].lower()
     bb = d.textbbox((0, 0), ch, font=ft)
     d.text(((n - (bb[2] - bb[0])) / 2 - bb[0], (n - (bb[3] - bb[1])) / 2 - bb[1]), ch, font=ft, fill=255 if black else 0)
-    return to_bits(im)
+    return to_bits(im, S)
 
 
 def chess_letters():
     """The chess pieces as letters (K Q R B N P), 20 x 20 in src/pieces.h's form: the body '#' (white pieces hollow
     with an outline, black ones solid, as the figures)."""
     out = {}
-    ft = latin(19)
+    ft = latin(19, bold=True)
     for name, ch in (('PAWN', 'P'), ('KNIGHT', 'N'), ('BISHOP', 'B'), ('ROOK', 'R'), ('QUEEN', 'Q'), ('KING', 'K')):
         im = Image.new('L', (20, 20), 255)
         d = ImageDraw.Draw(im)
@@ -121,94 +158,84 @@ def chess_letters():
     return out
 
 
-def piece(ch, black, scale=4):
-    """One piece, drawn 4 times bigger and reduced (smoother edges), then 1 bit."""
-    n = SIZE * scale
-    im = Image.new('L', (n, n), 255)
-    d = ImageDraw.Draw(im)
-    d.ellipse([0, 0, n - 1, n - 1], fill=0)                                  # the disc's edge
-    if black:
-        inner = 255
-        ft = font(int(n * 0.66))
-        bb = d.textbbox((0, 0), ch, font=ft)
-        x = (n - (bb[2] - bb[0])) / 2 - bb[0]; y = (n - (bb[3] - bb[1])) / 2 - bb[1]
-        d.text((x, y), ch, font=ft, fill=inner)
-    else:
-        w = int(scale * 1.6)
-        d.ellipse([w, w, n - 1 - w, n - 1 - w], fill=255)                     # white inside a thick ring
-        ft = font(int(n * 0.64))
-        bb = d.textbbox((0, 0), ch, font=ft)
-        x = (n - (bb[2] - bb[0])) / 2 - bb[0]; y = (n - (bb[3] - bb[1])) / 2 - bb[1]
-        d.text((x, y), ch, font=ft, fill=0)
-    small = im.resize((SIZE, SIZE), Image.LANCZOS)
-    mask = Image.new('L', (SIZE, SIZE), 255)                                  # outside the disc: transparent
-    ImageDraw.Draw(mask).ellipse([0, 0, SIZE - 1, SIZE - 1], fill=0)
-    return [[1 if small.getpixel((x, y)) < 128 else 0 for x in range(SIZE)] for y in range(SIZE)], \
-           [[1 if mask.getpixel((x, y)) < 128 else 0 for x in range(SIZE)] for y in range(SIZE)]
+def glyph(ch, n, frac, thin):
+    """a character drawn n x n, its strokes made thinner (THIN: the font is Black, the heaviest Noto: eroded at 8
+    times the size it reads as a Medium, one pixel strokes once reduced)"""
+    t = Image.new('L', (n, n), 255)
+    dt = ImageDraw.Draw(t)
+    ft = font(int(n * frac))
+    bb = dt.textbbox((0, 0), ch, font=ft)
+    dt.text(((n - (bb[2] - bb[0])) / 2 - bb[0], (n - (bb[3] - bb[1])) / 2 - bb[1]), ch, font=ft, fill=0)
+    return t.filter(ImageFilter.MaxFilter(thin)) if thin else t
+
+
+def piece(ch, black, S, scale=8):
+    """One piece, drawn 8 times bigger and reduced, then 1 bit (no dithering: it makes the strokes grainy)."""
+    n = S * scale
+    im, d = disc_only(black, S, scale)
+    t = glyph(ch, n, 0.66, THIN[S, black])
+    ink = t.point(lambda v: 255 if v < 128 else 0)                            # where the character is
+    im.paste(255 if black else 0, mask=ink)
+    return to_bits(im, S)
 
 
 def main():
-    rows = []
-    out = ['/* CHESS47 for DM42n - the round Xiangqi pieces, %d x %d, made by tools/xq_pieces.py from Noto Sans CJK'
-           % (SIZE, SIZE),
-           ' * TC Black (SIL Open Font License). Each row 3 bytes, bit 7 of byte 0 = the left pixel. XQ_PIECE[colour]'
-           '[type - 1]: the',
-           ' * ink; XQ_DISC: the disc (what a piece covers). Red: general advisor elephant horse chariot cannon '
-           'soldier',
-           ' * 帥仕相傌俥炮兵, Black 將士象馬車砲卒. GPL-3.0-or-later (the code), the glyphs from the font: OFL. */',
+    out = ['/* CHESS47 for DM42n - the round Xiangqi pieces, made by tools/xq_pieces.py from Noto Sans CJK TC Black',
+           ' * (thinned) and DejaVu Sans (SIL Open Font License, Bitstream Vera). Each row 3 bytes, bit 7 of byte 0 =',
+           ' * the left pixel. Two sizes: XQ_PIECE (23 px, the zoom) and XQ_PIECE_N (19 px, beside the soft keys);',
+           ' * [style][colour][type - 1]: style 0 the characters, 1 the symbols, 2 the letters (WXF). XQ_DISC*: the',
+           ' * disc (what a piece covers). Red 帥仕相傌俥炮兵, Black 將士象馬車砲卒. GPL-3.0-or-later (the code). */',
            '#ifndef CHESS47_XQ_PIECES_H', '#define CHESS47_XQ_PIECES_H', '#include <stdint.h>',
-           '#define XQ_PSIZE %d' % SIZE, '']
-    def pack(bm):
+           '#define XQ_STYLES 3', '']
+    def pack(bm, S):
         b = []
         for row in bm:
             v = 0
             for x in range(24):
-                v = v << 1 | (row[x] if x < SIZE else 0)
+                v = v << 1 | (row[x] if x < S else 0)
             b += [v >> 16, v >> 8 & 255, v & 255]
         return b
-    preview = Image.new('1', (SIZE * 7 * 4 + 8 * 4, SIZE * 2 * 4 + 12), 1)
-    out.append('/* XQ_PIECE[style][colour][type - 1]: style 0 the characters, 1 the symbols, 2 the letters (WXF) */')
-    out.append('#define XQ_STYLES 3')
-    out.append('static const uint8_t XQ_PIECE[3][2][7][%d] = {' % (SIZE * 3))
-    disc = None
-    for style in range(3):
-        out.append(' {')
-        for c in (0, 1):
-            out.append('  {')
-            for i, ch in enumerate(CHARS[c]):
-                if style == 0:
-                    bm, disc = piece(ch, c)
-                elif style == 1:
-                    bm = piece_symbol(i, c)
-                else:
-                    bm = piece_letter(i, c)
-                label = ch if style == 0 else ('symbol ' + LETTERS[i]) if style == 1 else LETTERS[i]
-                out.append('    { ' + ', '.join('0x%02x' % v for v in pack(bm)) + ' },   /* %s */' % label)
-                if style == 0:
-                    for y in range(SIZE):
-                        for x in range(SIZE):
+    Z = 3
+    preview = Image.new('1', (7 * 27 * Z + 8, 6 * 27 * Z + 2 * 6 * 23 * Z + 40), 1)
+    py = 4
+    for S in SIZES:
+        sfx = '' if S == 23 else '_N'
+        out.append('#define XQ_PSIZE%s %d' % (sfx, S))
+        out.append('static const uint8_t XQ_PIECE%s[3][2][7][%d] = {' % (sfx, S * 3))
+        for style in range(3):
+            out.append(' {')
+            for c in (0, 1):
+                out.append('  {')
+                for i, ch in enumerate(CHARS[c]):
+                    bm = piece(ch, c, S) if style == 0 else piece_symbol(i, c, S) if style == 1 else \
+                        piece_letter(i, c, S)
+                    label = ch if style == 0 else ('symbol ' + LETTERS[i]) if style == 1 else LETTERS[i]
+                    out.append('    { ' + ', '.join('0x%02x' % v for v in pack(bm, S)) + ' },   /* %s */' % label)
+                    for y in range(S):
+                        for x in range(S):
                             if bm[y][x]:
-                                for dy in range(4):
-                                    for dx in range(4):
-                                        preview.putpixel((4 + i * (SIZE * 4 + 4) + x * 4 + dx, 4 + c * (SIZE * 4 + 4) + y * 4 + dy), 0)
-            out.append('  },')
-        out.append(' },')
-    out.append('};')
-    out.append('static const uint8_t XQ_DISC[%d] = { ' % (SIZE * 3) + ', '.join('0x%02x' % v for v in pack(disc)) + ' };')
-    # the river's words 楚河 漢界, 15 x 15 (2 bytes a row)
+                                for dy in range(Z):
+                                    for dx in range(Z):
+                                        preview.putpixel((4 + i * (S + 4) * Z + x * Z + dx, py + y * Z + dy), 0)
+                    if i == 6:
+                        pass
+                py += (S + 4) * Z
+                out.append('  },')
+            out.append(' },')
+        out.append('};')
+        out.append('static const uint8_t XQ_DISC%s[%d] = { ' % (sfx, S * 3) +
+                   ', '.join('0x%02x' % v for v in pack(disc_mask(S), S)) + ' };')
+        py += 8
+    # the river's words 楚河 漢界, 15 x 15 (2 bytes a row), thinned as the pieces
     out.append('#define XQ_RSIZE 15')
     out.append('static const uint8_t XQ_RIVER[4][30] = {')
-    ft = font(15)
     for ch in '楚河漢界':
-        im = Image.new('L', (15, 15), 255)
-        d = ImageDraw.Draw(im)
-        bb = d.textbbox((0, 0), ch, font=ft)
-        d.text(((15 - (bb[2] - bb[0])) / 2 - bb[0], (15 - (bb[3] - bb[1])) / 2 - bb[1]), ch, font=ft, fill=0)
+        im = glyph(ch, 120, 1.0, 5).resize((15, 15), Image.LANCZOS)
         b = []
         for y in range(15):
             v = 0
             for x in range(16):
-                v = v << 1 | (1 if x < 15 and im.getpixel((x, y)) < 140 else 0)
+                v = v << 1 | (1 if x < 15 and im.getpixel((x, y)) < 128 else 0)
             b += [v >> 8, v & 255]
         out.append('  { ' + ', '.join('0x%02x' % v for v in b) + ' },   /* %s */' % ch)
     out.append('};')
@@ -227,7 +254,7 @@ def main():
     open(os.path.join(ROOT, 'src', 'letters.h'), 'w').write('\n'.join(L))
     open(os.path.join(ROOT, 'src', 'xq_pieces.h'), 'w', encoding='utf-8').write('\n'.join(out))
     os.makedirs(os.path.join(ROOT, 'docs'), exist_ok=True)
-    preview.save(os.path.join(ROOT, 'docs', 'xiangqi_pieces.png'))
+    preview.crop((0, 0, preview.width, py)).save(os.path.join(ROOT, 'docs', 'xiangqi_pieces.png'))
     print('src/xq_pieces.h, src/letters.h, docs/xiangqi_pieces.png')
 
 

@@ -27,13 +27,20 @@ To return to Free42: in Chess 47 press **SHIFT 0 (SETUP) → System**, or use
 
 ## Xiangqi (Chinese chess), experimental
 
-**SHIFT F1** switches between chess and Xiangqi (the chess game stays as it was). The same search as chess (the
-shared `src/search.inc`), the same levels, clock and modes (you vs CPU, 2 players, CPU vs CPU); moves in WXF
-notation (C2=5, H8+7). **×** changes the pieces: the traditional characters (Red 帥仕相傌俥炮兵, Black
-將士象馬車砲卒, from Noto Sans CJK), symbols, or the WXF letters K A E H R C P. In chess, **×** shows the pieces as
-letters.
+**SHIFT** opens the game menu, the same in both games: **F1 XIANGQI / CHESS** switches games (each keeps its
+own), **F2 PIECES** the pieces' style, **F3 ZOOM**, **F4 RESIGN**, **F5 DRAW**. Xiangqi has the same search as chess
+(the shared `src/search.inc`), the same levels, clock and modes (you vs CPU, 2 players, CPU vs CPU), soft keys and
+zoom; moves in WXF notation (C2=5, H8+7). The pieces (**×** or SHIFT F2): the traditional characters (Red
+帥仕相傌俥炮兵, Black 將士象馬車砲卒, from Noto Sans CJK, thinned to one-pixel strokes), symbols (crown, shield,
+elephant, horse, chariot, cannon, soldier: Red grey, a dithered fill, Black white on the disc), or the WXF letters
+K A E H R C P. In chess, **×** shows the pieces as letters.
 
-![Xiangqi](docs/xiangqi_characters.png) ![symbols](docs/xiangqi_symbols.png)
+| Normal (soft keys) | Zoom (+ / −) |
+|---|---|
+| ![Xiangqi](docs/xiangqi_characters.png) | ![zoom](docs/xiangqi_zoom.png) |
+| ![symbols](docs/xiangqi_symbols.png) | ![SHIFT: the game menu](docs/xiangqi_menu.png) |
+
+Soft keys in Xiangqi: page 1 NEW LEVEL FLIP UNDO HINT, page 2 PIECES CLOCK SIDE, page 3 CHESS MODE INFO.
 
 - The rules: palace, river, the horse's leg and the elephant's eye, the cannon's screen, the facing generals; no
   legal move loses (stalemate too); repetition is a draw (the real perpetual check / chase rules are not modelled);
@@ -56,6 +63,8 @@ letters.
 | **←** (backspace) | take back (two plies vs the CPU) |
 | **F1…F6** | soft keys (3 pages, `>>` switches page) |
 | **+** or **−** | zoom: the board the full screen height (30 px squares), the soft keys hidden (they still work); again: the normal view |
+| **SHIFT** | the game menu on the soft keys (also in the zoom): F1 XIANGQI / CHESS, F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW |
+| **×** | the pieces: figures / letters (Xiangqi: characters / symbols / letters) |
 | **SHIFT EXIT** | power off. The game is autosaved and resumed at power on |
 | **SHIFT 0** | setup: time/date, beep, USB disk, **System**, About |
 | **SHIFT ←** | resign at once |

@@ -536,6 +536,7 @@ function evaluate(p) {
 }
 
 /* ---- search ---- */
+const SP_RFP = 90, SP_FUT = 150, SP_LMP = 4;               /* as src/search.inc */
 let nodes = 0, stop = 0, t0 = 0, L = null, root_best = 0, root_score = 0;
 
 function check_stop() {
@@ -640,12 +641,19 @@ function negamax(ply, depth, alpha, beta, can_null) {
     }
   }
 
-  if (can_null && !incheck && ply && depth >= 3 && beta < MATE - 2 * MAXPLY && has_pieces(p) && evaluate(p) >= beta) {
+  /* near the leaves, out of the principal variation: the static score decides what is worth searching */
+  const pv = beta - alpha > 1;
+  const st = incheck ? -INF : evaluate(p);
+  if (!pv && !incheck && ply && depth <= 3 && beta < MATE - 2 * MAXPLY && st - SP_RFP * depth >= beta) return st;
+  const fut = !pv && !incheck && depth <= 2 && alpha > -MATE + 2 * MAXPLY && st + SP_FUT * depth <= alpha;
+
+  if (can_null && !incheck && ply && depth >= 3 && beta < MATE - 2 * MAXPLY && has_pieces(p) && st >= beta) {
     const n = copyPos(stk[ply + 1], p);
     n.side ^= 1; n.hi ^= zsH; n.lo ^= zsL;
     if (n.ep !== NOSQ) { n.hi ^= zeH[FILE_OF(n.ep)]; n.lo ^= zeL[FILE_OF(n.ep)]; n.ep = NOSQ; }
     n.half = 0;
     repH[rep_n] = n.hi; repL[rep_n] = n.lo; rep_n++;
+    mofs[ply + 1] = mofs[ply];                           /* the child's list starts here (not at a stale offset) */
     const R = depth > 6 ? 3 : 2;
     const s = -negamax(ply + 1, depth - 1 - R, -beta, -beta + 1, 0);
     rep_n--;
@@ -669,6 +677,9 @@ function negamax(ply, depth, alpha, beta, can_null) {
     repH[rep_n] = c.hi; repL[rep_n] = c.lo; rep_n++;
     const quiet = !(MFLAGS(m) & F_CAP) && !MPROMO(m);
     const gives = in_check(c);
+    /* futility and late move pruning: quiet moves that give no check, near the leaves, after the first */
+    if (legal > 1 && quiet && !gives && !pv && !incheck && m !== killer[ply * 2] && m !== killer[ply * 2 + 1] &&
+        (fut || (depth <= 3 && legal > SP_LMP + 2 * depth * depth))) { rep_n--; continue; }
     let nz = 0;
     if (ply === 0 && L.noise) nz = (hash32((m ^ L.seed) >>> 0) % (2 * L.noise + 1)) - L.noise;
     const a = alpha - nz, bt = beta - nz;

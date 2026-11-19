@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
   char line[16384];
   while (fgets(line, sizeof line, stdin)) {
     if (!strncmp(line, "uci", 3) && (line[3] == '\n' || line[3] == '\r' || !line[3])) {
-      puts("id name Xiangqi47 1.1\nid author Victor Valdes");
+      puts("id name Xiangqi47 1.2\nid author Victor Valdes");
       puts("option name UCI_Variant type combo default xiangqi var xiangqi");
       puts("option name Level type spin default 10 min 0 max 10");
       puts("uciok");

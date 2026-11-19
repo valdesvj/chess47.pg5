@@ -15,6 +15,7 @@ Fairy-Stockfish binary built with largeboards=yes (Xiangqi's board is 9 x 10).
 """
 import argparse
 import math
+import random
 import shutil
 import subprocess
 import sys
@@ -68,7 +69,7 @@ class Uci:
             self.p.kill()
 
 
-def play(x47, fsf, opening, x47_red, nodes, fsf_ms, max_plies):
+def play(x47, fsf, opening, x47_red, nodes, fsf_go, max_plies):
     """1 / 0.5 / 0 for Xiangqi 47"""
     start = sf.start_fen(V)
     moves = opening.split() if opening else []
@@ -91,7 +92,7 @@ def play(x47, fsf, opening, x47_red, nodes, fsf_ms, max_plies):
             break
         red_to_move = len(moves) % 2 == 0
         mine = red_to_move == x47_red
-        mv = x47.move(moves, 'go nodes %d' % nodes) if mine else fsf.move(moves, 'go movetime %d' % fsf_ms)
+        mv = x47.move(moves, 'go nodes %d' % nodes) if mine else fsf.move(moves, fsf_go)
         if mv not in legal:                                     # an illegal move loses
             print('  illegal move %s by %s after %s' % (mv, 'Xiangqi 47' if mine else 'Fairy-Stockfish',
                   ' '.join(moves)), file=sys.stderr)
@@ -123,6 +124,11 @@ def main():
                     help='the Fairy-Stockfish binary (built with largeboards=yes)')
     ap.add_argument('--full', action='store_true', help='Fairy-Stockfish at full strength (no UCI_Elo)')
     ap.add_argument('--plies', type=int, default=300, help='a draw after this many plies')
+    ap.add_argument('--opp-nodes', type=int, default=0, help='the opponent searches this many nodes a move (an A/B '
+                    'test of two builds of the engine: --fairy build/xq-uci-old --full --opp-nodes N)')
+    ap.add_argument('--random', type=int, default=0, help='openings of this many random plies (a pair each, seeded)')
+    ap.add_argument('--seed', type=int, default=47)
+    ap.add_argument('--first', type=int, default=0, help='start at this game (repeat one part of a match)')
     a = ap.parse_args()
 
     for o in OPENINGS:                                          # the openings must be legal
@@ -144,15 +150,24 @@ def main():
     fsf.ready()
 
     w = d = l = 0
-    for g in range(a.games):
+    for g in range(a.first, a.games):
         x47_red = g % 2 == 0
-        s = play(x47, fsf, OPENINGS[(g // 2) % len(OPENINGS)], x47_red, a.nodes, a.sfms, a.plies)
+        if a.random:                                            # the same random opening for both colours
+            rng, mv = random.Random(a.seed * 1000 + g // 2), []
+            for _ in range(a.random):
+                mv.append(rng.choice(sf.legal_moves(V, sf.start_fen(V), mv)))
+            op = ' '.join(mv)
+        else:
+            op = OPENINGS[(g // 2) % len(OPENINGS)]
+        fsf_go = 'go nodes %d' % a.opp_nodes if a.opp_nodes else 'go movetime %d' % a.sfms
+        s = play(x47, fsf, op, x47_red, a.nodes, fsf_go, a.plies)
         w += s == 1.0
         d += s == 0.5
         l += s == 0.0
         print(f"game {g+1:2d} {'Red  ' if x47_red else 'Black'} {s}", file=sys.stderr, flush=True)
     x47.quit()
     fsf.quit()
+    a.games -= a.first
     sc = (w + 0.5 * d) / a.games
     var = (w * (1 - sc) ** 2 + d * (0.5 - sc) ** 2 + l * sc ** 2) / a.games
     m = 1.96 * math.sqrt(var / a.games)

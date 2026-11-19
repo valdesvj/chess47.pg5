@@ -42,6 +42,10 @@ K A E H R C P. In chess, **×** shows the pieces as letters.
 
 Soft keys in Xiangqi: page 1 NEW LEVEL FLIP UNDO HINT, page 2 PIECES CLOCK SIDE, page 3 CHESS MODE INFO.
 
+From level 4 the CPU plays from an **opening book** of the classical openings (中炮 central cannon against 屏風馬
+screen horses, 順炮 and 列炮, 反宮馬, 飛相 elephant, 仙人指路 pawn, 起馬 horse, 過宮炮), a random line each game.
+At level CRAZY the crazy face shows, as in chess.
+
 **SHIFT 7** (七, seven) sets up **七星聚會, the Seven Stars Gathering**: the "king of the endgames", the most famous of
 the four great classical compositions (江湖四大名局), as 竹香齋 printed it in 1801. Each side has seven pieces, and
 Red moves first. It looks like an easy win for Red, but one wrong move and Black mates. With the best play it is a
@@ -112,6 +116,23 @@ while the computer thinks. At the end a box on the board says what happened, why
 fell), **RESIGNS**. With USB on, the result also goes to the PC as a `result 1-0 ...` line.
 
 ## Strength (measured against Stockfish)
+
+**v1.2: a stronger search for both games, and a new Xiangqi evaluation.** Measured against v1.1 with the same
+node budget per move (random openings, both colours; `test/match.py --opponent`, `test/xq_match.py --full
+--opp-nodes`):
+
+| Change | Game | Nodes/move | Result vs v1.1 | Score | ≈ Elo |
+|---|---|---:|---|---:|---:|
+| reverse futility, futility and late-move pruning (`src/search.inc`) | chess | 30 000 | +65 =21 −14 | 76% | +195 |
+| the same | chess | 100 000 | +23 =9 −8 | 69% | +135 |
+| new evaluation: mobility, attack on the general, central cannon, cannon/horse by phase | Xiangqi | 30 000 | +71 =15 −14 | 79% | +225 |
+| the new evaluation, at equal **time** (it costs 1.36× a node) | Xiangqi | 30 000 vs 41 000 | +62 =13 −25 | 69% | +135 |
+| the pruning, on top | Xiangqi | 30 000 | +62 =16 −22 | 70% | +150 |
+| **all of v1.2, at equal time** | **Xiangqi** | 30 000 vs 41 000 | **+80 =12 −8** | **86%** | **+310** |
+
+Also fixed: the null move could let a child node write over its parent's move list (a stale offset), a rare
+wrong move in both games. The tables below were measured with v1.1; v1.2 is stronger in both games.
+
 
 Chess 47 (PC build, same engine) against **Stockfish 16** with `UCI_LimitStrength`
 at a fixed `UCI_Elo` and 100 ms per move. Chess 47 got a **fixed node budget** per move

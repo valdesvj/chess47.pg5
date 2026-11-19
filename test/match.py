@@ -23,13 +23,13 @@ OPENINGS = [
 ]
 
 
-def play(c47, sf, board, c47_white, nodes, sf_ms):
+def play(c47, sf, board, c47_white, nodes, sf_ms, opp_nodes=0):
     while not board.is_game_over(claim_draw=True) and board.fullmove_number < 200:
         mine = (board.turn == chess.WHITE) == c47_white
         if mine:
             r = c47.play(board, chess.engine.Limit(nodes=nodes))
         else:
-            r = sf.play(board, chess.engine.Limit(time=sf_ms / 1000))
+            r = sf.play(board, chess.engine.Limit(nodes=opp_nodes) if opp_nodes else chess.engine.Limit(time=sf_ms / 1000))
         board.push(r.move)
     res = board.result(claim_draw=True)
     if res == "1/2-1/2" or res == "*":
@@ -55,13 +55,19 @@ def main():
     ap.add_argument("--level", type=int, default=-1, help="Chess 47 level 1-9 (default: full strength = level 9)")
     ap.add_argument("--stockfish", default=shutil.which("stockfish") or "/usr/games/stockfish",
                     help="the Stockfish binary (default: the one on PATH)")
+    ap.add_argument("--opponent", default="", help="another build of Chess 47 instead of Stockfish (an A/B test)")
+    ap.add_argument("--opp-nodes", type=int, default=0, help="the opponent's nodes a move (A/B test)")
+    ap.add_argument("--random", type=int, default=0, help="openings of this many random plies (a pair each, seeded)")
     a = ap.parse_args()
 
     c47 = chess.engine.SimpleEngine.popen_uci([a.engine, "-q"])
     if 1 <= a.level <= 9:
         c47.configure({"Level": a.level})
-    sf = chess.engine.SimpleEngine.popen_uci(a.stockfish)
-    sf.configure({"UCI_LimitStrength": True, "UCI_Elo": a.elo, "Threads": 1, "Hash": 16})
+    if a.opponent:
+        sf = chess.engine.SimpleEngine.popen_uci([a.opponent, "-q"])
+    else:
+        sf = chess.engine.SimpleEngine.popen_uci(a.stockfish)
+        sf.configure({"UCI_LimitStrength": True, "UCI_Elo": a.elo, "Threads": 1, "Hash": 16})
     # python-chess sends UCI_Chess960 itself when the board is a 960 board
 
     w = d = l = 0
@@ -69,12 +75,16 @@ def main():
         pair = g // 2
         if a.c960:
             board = chess.Board.from_chess960_pos(random.Random(a.seed * 1000 + pair).randint(0, 959))
+        elif a.random:                                     # the same random opening for both colours
+            board, rng = chess.Board(), random.Random(a.seed * 1000 + pair)
+            for _ in range(a.random):
+                board.push(rng.choice(sorted(board.legal_moves, key=lambda m: m.uci())))
         else:
             board = chess.Board()
             for mv in OPENINGS[pair % len(OPENINGS)].split():
                 board.push_uci(mv)
         c47_white = g % 2 == 0
-        s = play(c47, sf, board, c47_white, a.nodes, a.sfms)
+        s = play(c47, sf, board, c47_white, a.nodes, a.sfms, a.opp_nodes)
         w += s == 1.0
         d += s == 0.5
         l += s == 0.0

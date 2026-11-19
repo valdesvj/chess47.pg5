@@ -677,11 +677,42 @@ function xq_undo() {
   save_auto();
 }
 
+/* the opening book (levels 4+, from the usual start), as src/xq_ui.c: Fairy-Stockfish's coordinates */
+const XQ_BOOK = [
+  'h3e3 h10g8 h1g3 i10h10 i1h1 b10c8 g4g5 g7g6 b1c3 a10b10',   /* 中炮對屏風馬 central cannon, screen horses */
+  'h3e3 h10g8 h1g3 b10c8 i1h1 i10h10 g4g5 g7g6 b1c3',
+  'h3e3 h10g8 h1g3 i10h10 i1h1 b10c8 b3c3 a10b10 b1a3',       /* 五七炮 */
+  'h3e3 h8e8 h1g3 h10g8 i1h1 i10h10 b1c3',                     /* 順炮 same-direction cannons */
+  'h3e3 b8e8 h1g3 b10c8 i1h1 a10b10 b1c3',                     /* 列炮 opposite cannons */
+  'h3e3 b10c8 h1g3 h8f8 i1h1 h10g8',                           /* 反宮馬 */
+  'g1e3 g7g6 h1g3 h10g8 i1h1 i10h10',                          /* 飛相局 elephant opening */
+  'g1e3 h8e8 h1g3 h10g8',
+  'c1e3 b8e8 b1c3 b10c8',
+  'c4c5 g7g6 b1c3 h10g8 h1g3 b10c8',                           /* 仙人指路 pawn opening */
+  'c4c5 h8c8 h3e3 c10e8 h1g3',                                 /* 卒底炮 */
+  'h1g3 g7g6 c4c5 h10g8 b1c3',                                 /* 起馬局 horse opening */
+  'h3d3 h10g8 h1g3 i10h10',                                    /* 過宮炮 */
+];
+function xq_book_move() {
+  if (xseven || XG.start !== XQ_START || XG.n >= 10) return 0;
+  const line = XG.moves.slice(0, XG.n).map(m => X.xq_move_to_str(m, 0) + ' ').join('');
+  const cand = [];
+  for (const b of XQ_BOOK) if (b.startsWith(line) && b.length > line.length) cand.push(b.slice(line.length).split(' ')[0]);
+  if (!cand.length) return 0;
+  const pick = cand[Math.floor(Math.random() * cand.length)];
+  return XG.legal.find(m => X.xq_move_to_str(m, 0) === pick) || 0;
+}
+
 const score_text = d => X.IS_MATE(d.score) ? `d${d.depth} ${d.san} M${d.score < 0 ? '-' : ''}${Math.floor((X.MATE - Math.abs(d.score) + 1) / 2)}`
                                            : `d${d.depth} ${d.san} ${d.score >= 0 ? '+' : ''}${d.score}`;
 async function xq_cpu_move() {
   const L = LEVELS[cfg.level];
   let m;
+  if (cfg.level >= 4 && (m = xq_book_move())) {
+    await sleep(200);
+    if (!xq) return;
+    xq_do_move(m); status = 'Book: ' + XG.wxf[XG.n - 1]; return;
+  }
   if (cfg.level === 0) { await sleep(250); m = XG.legal[Math.floor(Math.random() * XG.legal.length)]; }
   else {
     thinking = 1; status = 'Thinking...'; redraw();
@@ -913,12 +944,18 @@ function xq_draw_panel() {
       if (XB.seven[k][yy] >> (15 - x) & 1) fill(4 + k * 18 + x, y + 1 + yy, 1, 1, 1);
     y += 18;
   }
-  const bottom = cfg.zoom ? LCD_Y - 2 : MENU_Y - 2, lines = Math.max(1, Math.floor((bottom - y) / h));
+  const crazy = cfg.level === 0 && cfg.mode !== MODE_HH, pbot = cfg.zoom ? LCD_Y : MENU_Y;
+  const bottom = crazy ? pbot - 50 : pbot - 2, lines = Math.max(1, Math.floor((bottom - y) / h));
   const total = (XG.n + 1) >> 1, first = Math.max(0, total - lines);
   for (let ln = first; ln < total; ln++) {
     ptext(2, y, (ln + 1) + '.', 0); ptext(46, y, XG.wxf[2 * ln], 0);
     if (2 * ln + 1 < XG.n) ptext(114, y, XG.wxf[2 * ln + 1], 0);
     y += h;
+  }
+  if (crazy) {                                            /* CRAZY: the crazy face, as chess */
+    const c = BMP.crazy;
+    for (let j = 0; j < c.length; j++) for (let i = 0; i < c[j].length; i++) if (c[j][i] === '#') fill(4 + i * 2, pbot - 46 + j * 2, 2, 2, 1);
+    ptext(60, pbot - 36, 'CRAZY!', 1);
   }
 }
 

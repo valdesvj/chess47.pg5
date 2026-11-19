@@ -332,24 +332,97 @@ function pst(ty, rr, f) {
   default:       return 0;
   }
 }
-function xq_evaluate(p) {
-  const sc = [0, 0], guard = [0, 0];
+const XE_MOB_R = 3, XE_MOB_H = 10, XE_MOB_C = 2, XE_PHASE = 6, XE_ATT = 14, XE_CCN = 25;   /* as src/xq_engine.c */
+
+/* the attack on the general of side by ^ 1: chariots, horses, cannons and soldiers close to its palace */
+function attack(p, by) {
+  const g = ksq(p, by ^ 1), gf = XFILE(g), gr = XRANK(g);
+  let units = 0;
   for (let r = 0; r < 10; r++)
     for (let f = 0; f < 9; f++) {
       const pc = p.b[XSQ(f, r)];
+      if (!pc || XCOLOR(pc) !== by) continue;
+      const df = f > gf ? f - gf : gf - f, dr = r > gr ? r - gr : gr - r, ty = XTYPE(pc);
+      if (ty === XCHARIOT && (df <= 1 || dr <= 1)) units += 3;
+      else if (ty === XHORSE && df + dr <= 4) units += 2;
+      else if (ty === XCANNON && (df === 0 || dr === 0)) units += 2;
+      else if (ty === XPAWN && df + dr <= 2) units += 2;
+    }
+  return Math.trunc(units * units * XE_ATT / 4);
+}
+
+function xq_evaluate(p) {
+  const b = p.b, sc = [0, 0], guard = [0, 0];
+  for (let r = 0; r < 10; r++)
+    for (let f = 0; f < 9; f++) {
+      const s = XSQ(f, r), pc = b[s];
       if (!pc) continue;
       const c = XCOLOR(pc), ty = XTYPE(pc), rr = c === XRED ? r : 9 - r;
       sc[c] += XVAL[ty] + pst(ty, rr, f);
       if (ty === XADVISOR || ty === XELEPHANT) guard[c]++;
+      else if (ty === XCHARIOT) {
+        let n = 0;
+        for (let k = 0; k < 4; k++) {
+          const d = ORTH[k];
+          let t = s + d;
+          while (!b[t]) { n++; t += d; }
+          if (b[t] !== XOFF && XCOLOR(b[t]) !== c) n++;
+        }
+        sc[c] += n * XE_MOB_R;
+      } else if (ty === XHORSE) {
+        let n = 0;
+        for (let k = 0; k < 8; k++) {
+          const t = s + HD[k];
+          if (!b[s + HL[k]] && b[t] !== XOFF && (!b[t] || XCOLOR(b[t]) !== c)) n++;
+        }
+        sc[c] += n * XE_MOB_H - 16;
+      } else if (ty === XCANNON) {
+        let n = 0;
+        for (let k = 0; k < 4; k++) {
+          const d = ORTH[k];
+          let t = s + d;
+          while (!b[t]) { n++; t += d; }
+          if (b[t] === XOFF) continue;
+          t += d;
+          while (!b[t]) t += d;
+          if (b[t] !== XOFF && XCOLOR(b[t]) !== c) n++;
+        }
+        sc[c] += n * XE_MOB_C;
+        const g = ksq(p, c ^ 1);
+        if (XFILE(g) === f) {
+          const d = XRANK(g) > r ? 16 : -16;
+          let t = s + d, between = 0;
+          while (t !== g) { if (b[t]) between++; t += d; }
+          if (between === 1) sc[c] += XE_CCN;
+        }
+      }
     }
+  if (XE_PHASE) {                                       /* the cannon with many pieces, the horse in the endgame */
+    let maj = 0;
+    const nc = [0, 0], nh = [0, 0];
+    for (let r = 0; r < 10; r++)
+      for (let f = 0; f < 9; f++) {
+        const pc = b[XSQ(f, r)], ty = XTYPE(pc);
+        if (!pc) continue;
+        if (ty === XCHARIOT || ty === XHORSE || ty === XCANNON) maj++;
+        if (ty === XCANNON) nc[XCOLOR(pc)]++;
+        if (ty === XHORSE) nh[XCOLOR(pc)]++;
+      }
+    const adj = (maj - 6) * XE_PHASE;
+    sc[0] += (nc[0] - nh[0]) * adj;
+    sc[1] += (nc[1] - nh[1]) * adj;
+  }
   sc[0] -= (4 - guard[0]) * 15;
   sc[1] -= (4 - guard[1]) * 15;
+  sc[0] += Math.trunc(attack(p, XRED) * (8 - guard[1]) / 6);
+  sc[1] += Math.trunc(attack(p, XBLACK) * (8 - guard[0]) / 6);
   const v = sc[0] - sc[1];
   return (p.side === XRED ? v : -v) + 10;
 }
 
 /* ---- the search: src/search.inc with Xiangqi's hooks ---- */
 const ORDV = [0, 9, 2, 2, 4, 6, 5, 1];
+const SP_RFP = 90, SP_FUT = 150, SP_LMP = 4;               /* as src/search.inc */
 let nodes = 0, stop = 0, t0 = 0, L = null, root_best = 0, root_score = 0;
 
 function check_stop() {
@@ -448,10 +521,17 @@ function negamax(ply, depth, alpha, beta, can_null) {
     }
   }
 
-  if (can_null && !incheck && ply && depth >= 3 && beta < MATE - 2 * MAXPLY && has_pieces(p) && xq_evaluate(p) >= beta) {
+  /* near the leaves, out of the principal variation: the static score decides what is worth searching */
+  const pv = beta - alpha > 1;
+  const st = incheck ? -INF : xq_evaluate(p);
+  if (!pv && !incheck && ply && depth <= 3 && beta < MATE - 2 * MAXPLY && st - SP_RFP * depth >= beta) return st;
+  const fut = !pv && !incheck && depth <= 2 && alpha > -MATE + 2 * MAXPLY && st + SP_FUT * depth <= alpha;
+
+  if (can_null && !incheck && ply && depth >= 3 && beta < MATE - 2 * MAXPLY && has_pieces(p) && st >= beta) {
     const n = copyPos(stk[ply + 1], p);
     n.side ^= 1; n.hi ^= zsH; n.lo ^= zsL; n.half = 0;
     repH[rep_n] = n.hi; repL[rep_n] = n.lo; rep_n++;
+    mofs[ply + 1] = mofs[ply];                           /* the child's list starts here (not at a stale offset) */
     const R = depth > 6 ? 3 : 2;
     const s = -negamax(ply + 1, depth - 1 - R, -beta, -beta + 1, 0);
     rep_n--;
@@ -475,6 +555,9 @@ function negamax(ply, depth, alpha, beta, can_null) {
     repH[rep_n] = c.hi; repL[rep_n] = c.lo; rep_n++;
     const quiet = !(XFLAGS(m) & XF_CAP);
     const gives = xq_in_check(c);
+    /* futility and late move pruning: quiet moves that give no check, near the leaves, after the first */
+    if (legal > 1 && quiet && !gives && !pv && !incheck && m !== killer[ply * 2] && m !== killer[ply * 2 + 1] &&
+        (fut || (depth <= 3 && legal > SP_LMP + 2 * depth * depth))) { rep_n--; continue; }
     let nz = 0;
     if (ply === 0 && L.noise) nz = (hash32((m ^ L.seed) >>> 0) % (2 * L.noise + 1)) - L.noise;
     const a = alpha - nz, bt = beta - nz;

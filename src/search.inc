@@ -13,6 +13,7 @@
  *   G_HAS_PIECES(p)          the side to move has pieces for a null move (no zugzwang worry)
  *   G_NULL_MOVE(p, n)        n = p with the move passed (side, key, en passant)
  *   G_QUIET(m)               not a capture and not a promotion (LMR, killers, history)
+ *   G_NOLEGAL(chk, ply)      the score with no legal move (chess: mated or stalemate 0; Xiangqi: lost either way)
  * and the tables: tt, tt_n, stk, mbuf, sbuf, mofs, killer, hh, rep, rep_n, scratch, nodes; MBUF; evaluate,
  * gen_moves, gen_legal, make_move, in_check.
  */
@@ -179,7 +180,7 @@ static int negamax(int ply, int depth, int alpha, int beta, int can_null) {
       }
     }
   }
-  if (!legal) return incheck ? -MATE + ply : 0;
+  if (!legal) return G_NOLEGAL(incheck, ply);
 
   if (e->key != p->key || depth >= e->depth || best >= beta) {
     e->key = p->key;

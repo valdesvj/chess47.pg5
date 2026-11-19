@@ -758,6 +758,12 @@ static inline void chess_null(const Pos *p, Pos *n) {
   n->half = 0;
 }
 
+const EngShared *eng_shared(void) {
+  static EngShared sh;
+  sh.tt = tt; sh.tt_n = tt_n; sh.mbuf = mbuf; sh.sbuf = sbuf; sh.killer = killer; sh.rep = rep; sh.scratch = scratch;
+  return &sh;
+}
+
 #define SEARCH_NAME            search
 #define G_TACTICAL(p, m)       chess_tactical(p, m)
 #define G_ORDER_ADJ(m)         ((MPROMO(m) && MPROMO(m) != QUEEN) ? -2000000 : 0)   /* under-promotions last */
@@ -768,5 +774,6 @@ static inline void chess_null(const Pos *p, Pos *n) {
 #define G_HAS_PIECES(p)        has_pieces(p)
 #define G_NULL_MOVE(p, n)      chess_null(p, n)
 #define G_QUIET(m)             (!(MFLAGS(m) & F_CAP) && !MPROMO(m))
+#define G_NOLEGAL(chk, ply)    ((chk) ? -MATE + (ply) : 0)
 
 #include "search.inc"

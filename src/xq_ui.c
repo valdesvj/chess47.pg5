@@ -243,7 +243,7 @@ static void xq_draw_panel(void) {
     y += XQ_RSIZE + 3;
   }
   /* the moves, two a line (WXF), the last that fit */
-  int bottom = XBOT - 2, lines = (bottom - y) / h;
+  int bottom = cfg.level == 0 && cfg.mode != MODE_HH ? XBOT - 50 : XBOT - 2, lines = (bottom - y) / h;
   int total = (XG->n + 1) / 2, first = total - lines;
   if (first < 0) first = 0;
   for (int ln = first; ln < total; ln++) {
@@ -252,6 +252,11 @@ static void xq_draw_panel(void) {
     xptext(46, y, XG->wxf[2 * ln], 0);                 /* room for 3-digit move numbers (Xiangqi games run long) */
     if (2 * ln + 1 < XG->n) xptext(114, y, XG->wxf[2 * ln + 1], 0);
     y += h;
+  }
+  if (cfg.level == 0 && cfg.mode != MODE_HH) {          /* CRAZY: the crazy face, as chess */
+    lcd_fill_rect(0, XBOT - 48, XPANEL + 1, 48, 0);
+    draw_bitmap(CRAZY_BMP, CRAZY_W, CRAZY_H, 4, XBOT - 46, 2);
+    xptext(60, XBOT - 36, "CRAZY!", 1);
   }
 }
 
@@ -352,11 +357,59 @@ static Result xq_run_search(int depth, uint32_t ms, int noise) {
   return r;
 }
 
+/* the opening book (levels 4+, from the usual start): the classical openings, in Fairy-Stockfish's coordinates
+   (ranks 1-10); a random line among those that fit the game so far gives variety */
+static const char *const XQ_BOOK[] = {
+  "h3e3 h10g8 h1g3 i10h10 i1h1 b10c8 g4g5 g7g6 b1c3 a10b10",   /* 中炮對屏風馬 central cannon, screen horses */
+  "h3e3 h10g8 h1g3 b10c8 i1h1 i10h10 g4g5 g7g6 b1c3",
+  "h3e3 h10g8 h1g3 i10h10 i1h1 b10c8 b3c3 a10b10 b1a3",       /* 五七炮 */
+  "h3e3 h8e8 h1g3 h10g8 i1h1 i10h10 b1c3",                     /* 順炮 same-direction cannons */
+  "h3e3 b8e8 h1g3 b10c8 i1h1 a10b10 b1c3",                     /* 列炮 opposite cannons */
+  "h3e3 b10c8 h1g3 h8f8 i1h1 h10g8",                           /* 反宮馬 */
+  "g1e3 g7g6 h1g3 h10g8 i1h1 i10h10",                          /* 飛相局 elephant opening */
+  "g1e3 h8e8 h1g3 h10g8",
+  "c1e3 b8e8 b1c3 b10c8",
+  "c4c5 g7g6 b1c3 h10g8 h1g3 b10c8",                           /* 仙人指路 pawn opening */
+  "c4c5 h8c8 h3e3 c10e8 h1g3",                                 /* 卒底炮 */
+  "h1g3 g7g6 c4c5 h10g8 b1c3",                                 /* 起馬局 horse opening */
+  "h3d3 h10g8 h1g3 i10h10",                                    /* 過宮炮 */
+};
+
+static Move xq_book_move(void) {
+  XPos s0;
+  xq_pos_start(&s0);
+  if (xseven || XG->start.key != s0.key || XG->start.side != XRED || XG->n >= 10) return 0;
+  char line[128], *o = line;
+  for (int i = 0; i < XG->n; i++) { xq_move_to_str(XG->moves[i], o, 0); o += strlen(o); *o++ = ' '; }
+  *o = 0;
+  size_t len = strlen(line);
+  char cand[16][8];
+  int nc = 0;
+  for (unsigned i = 0; i < sizeof XQ_BOOK / sizeof *XQ_BOOK && nc < 16; i++) {
+    const char *b = XQ_BOOK[i];
+    if (strncmp(b, line, len) || strlen(b) <= len) continue;
+    int k = 0;
+    while (b[len + k] && b[len + k] != ' ' && k < 7) { cand[nc][k] = b[len + k]; k++; }
+    cand[nc++][k] = 0;
+  }
+  if (!nc) return 0;
+  const char *pick = cand[rnd() % (uint32_t)nc];
+  char t[8];
+  for (int i = 0; i < XG->nlegal; i++) { xq_move_to_str(XG->legal[i], t, 0); if (!strcmp(t, pick)) return XG->legal[i]; }
+  return 0;
+}
+
 static int xq_cpu_turn(void) { return !XG->over && !is_human(XG->cur.side) && XG->nlegal; }
 
 static void xq_cpu_move(void) {
   Move m;
   const Level *L = &LEVELS[cfg.level];
+  if (cfg.level >= 4 && (m = xq_book_move()) != 0) {
+    sys_delay(200);
+    xq_do_move(m);
+    sprintf(status, "Book: %s", XG->wxf[XG->n - 1]);
+    return;
+  }
   if (cfg.level == 0) { m = XG->legal[rnd() % (uint32_t)XG->nlegal]; sys_delay(250); }
   else {
     Result r = xq_run_search(L->depth, think_time(L->ms), L->noise);

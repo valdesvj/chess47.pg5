@@ -370,19 +370,93 @@ static int pst(int ty, int rr, int f) {
   }
 }
 
+#ifndef XE_MOB_R
+#define XE_MOB_R 3       /* a chariot's reachable point */
+#endif
+#ifndef XE_MOB_H
+#define XE_MOB_H 10      /* a horse's free jump (a blocked leg costs it) */
+#endif
+#ifndef XE_MOB_C
+#define XE_MOB_C 2       /* a cannon's point */
+#endif
+#ifndef XE_PHASE
+#define XE_PHASE 6       /* per major piece on the board above 6: the cannon gains it, the horse loses it */
+#endif
+#ifndef XE_ATT
+#define XE_ATT 14        /* the attack on a general: units * units * XE_ATT / 4, more with its guards gone */
+#endif
+#ifndef XE_CCN
+#define XE_CCN 25        /* a cannon on the general's file with one screen (it pins, threatens) */
+#endif
+
 int xq_evaluate(const Pos *p) {
-  int sc[2] = { 0, 0 }, guard[2] = { 0, 0 };
+  const uint8_t *b = p->b;
+  int sc[2] = { 0, 0 }, guard[2] = { 0, 0 }, units[2] = { 0, 0 }, maj = 0, ch[2] = { 0, 0 };
+  int gf[2] = { XFILE(p->ksq[0]), XFILE(p->ksq[1]) }, gr[2] = { XRANK(p->ksq[0]), XRANK(p->ksq[1]) };
   for (int r = 0; r < 10; r++)
     for (int f = 0; f < 9; f++) {
-      int pc = p->b[XSQ(f, r)];
+      int s = XSQ(f, r), pc = b[s];
       if (!pc) continue;
-      int c = XCOLOR(pc), ty = XTYPE(pc), rr = c == XRED ? r : 9 - r;
+      int c = XCOLOR(pc), ty = XTYPE(pc), rr = c == XRED ? r : 9 - r, o = c ^ 1;
+      int df = f > gf[o] ? f - gf[o] : gf[o] - f, dr = r > gr[o] ? r - gr[o] : gr[o] - r;   /* to the other general */
       sc[c] += XVAL[ty] + pst(ty, rr, f);
-      if (ty == XADVISOR || ty == XELEPHANT) guard[c]++;
+      switch (ty) {
+      case XADVISOR: case XELEPHANT: guard[c]++; break;
+      case XPAWN: if (df + dr <= 2) units[c] += 2; break;
+      case XCHARIOT: {
+        int n = 0;
+        for (int k = 0; k < 4; k++) {
+          int d = ORTH[k], t = s + d;
+          while (!b[t]) { n++; t += d; }
+          if (b[t] != XOFF && XCOLOR(b[t]) != c) n++;
+        }
+        sc[c] += n * XE_MOB_R;
+        if (df <= 1 || dr <= 1) units[c] += 3;
+        maj++;
+        break;
+      }
+      case XHORSE: {
+        int n = 0;
+        for (int k = 0; k < 8; k++) {
+          int t = s + HD[k];
+          if (!b[s + HL[k]] && b[t] != XOFF && (!b[t] || XCOLOR(b[t]) != c)) n++;
+        }
+        sc[c] += n * XE_MOB_H - 16;                     /* a horse with two jumps or fewer is a poor horse */
+        if (df + dr <= 4) units[c] += 2;
+        maj++; ch[c]--;
+        break;
+      }
+      case XCANNON: {
+        int n = 0;
+        for (int k = 0; k < 4; k++) {
+          int d = ORTH[k], t = s + d;
+          while (!b[t]) { n++; t += d; }
+          if (b[t] == XOFF) continue;
+          t += d;
+          while (!b[t]) t += d;
+          if (b[t] != XOFF && XCOLOR(b[t]) != c) n++;
+        }
+        sc[c] += n * XE_MOB_C;
+        if (df == 0 || dr == 0) units[c] += 2;
+        if (df == 0) {                                  /* on the other general's file, one piece between */
+          int g = p->ksq[o], d = gr[o] > r ? 16 : -16, t = s + d, between = 0;
+          while (t != g) { if (b[t]) between++; t += d; }
+          if (between == 1) sc[c] += XE_CCN;
+        }
+        maj++; ch[c]++;
+        break;
+      }
+      }
     }
-  /* a general without its guards is easier to attack: each missing one counts more with the other side's chariots */
+  /* the cannon is worth more with many pieces (screens), the horse in the endgame (open points) */
+  int adj = (maj - 6) * XE_PHASE;
+  sc[0] += ch[0] * adj;
+  sc[1] += ch[1] * adj;
+  /* a general without its guards is easier to attack: the attackers close to it count more */
   sc[0] -= (4 - guard[0]) * 15;
   sc[1] -= (4 - guard[1]) * 15;
+  sc[0] += units[0] * units[0] * XE_ATT / 4 * (8 - guard[1]) / 6;
+  sc[1] += units[1] * units[1] * XE_ATT / 4 * (8 - guard[0]) / 6;
   int v = sc[0] - sc[1];
   return (p->side == XRED ? v : -v) + 10;
 }

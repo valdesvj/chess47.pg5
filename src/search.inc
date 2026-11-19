@@ -18,6 +18,16 @@
  * gen_moves, gen_legal, make_move, in_check.
  */
 
+#ifndef SP_RFP
+#define SP_RFP 90        /* reverse futility: the static score this far above beta per ply left (depth <= 3) */
+#endif
+#ifndef SP_FUT
+#define SP_FUT 150       /* futility: quiet moves skipped when the static score is this far below alpha a ply */
+#endif
+#ifndef SP_LMP
+#define SP_LMP 4         /* late move pruning: quiet moves after 4 + 2 depth^2 tries skipped (depth <= 3) */
+#endif
+
 static int      stop;
 static uint32_t t0;
 static const Limits *L;
@@ -113,11 +123,20 @@ static int negamax(int ply, int depth, int alpha, int beta, int can_null) {
     }
   }
 
+  /* near the leaves, out of the principal variation: the static score decides what is worth searching */
+  int pv = beta - alpha > 1;
+  int st = incheck ? -INF : evaluate(p);
+  if (SP_RFP && !pv && !incheck && ply && depth <= 3 && beta < MATE - 2 * MAXPLY && st - SP_RFP * depth >= beta)
+    return st;                                /* reverse futility: far above beta, the opponent will not allow it */
+  int fut = SP_FUT && !pv && !incheck && depth <= 2 && alpha > -MATE + 2 * MAXPLY && st + SP_FUT * depth <= alpha;
+
   /* null move pruning */
-  if (can_null && !incheck && ply && depth >= 3 && beta < MATE - 2 * MAXPLY && G_HAS_PIECES(p) && evaluate(p) >= beta) {
+  if (can_null && !incheck && ply && depth >= 3 && beta < MATE - 2 * MAXPLY && G_HAS_PIECES(p) && st >= beta) {
     Pos *n = &stk[ply + 1];
     G_NULL_MOVE(p, n);
     rep[rep_n++] = n->key;
+    mofs[ply + 1] = mofs[ply];                /* this node has no moves yet: the child's list starts here (a stale
+                                                 offset from an earlier node could overwrite a parent's list) */
     int R = depth > 6 ? 3 : 2;
     int s = -negamax(ply + 1, depth - 1 - R, -beta, -beta + 1, 0);
     rep_n--;
@@ -142,6 +161,9 @@ static int negamax(int ply, int depth, int alpha, int beta, int can_null) {
     rep[rep_n++] = c->key;
     int quiet = G_QUIET(m);
     int gives = in_check(c);
+    /* futility and late move pruning: quiet moves that give no check, near the leaves, after the first */
+    if (legal > 1 && quiet && !gives && !pv && !incheck && m != killer[ply][0] && m != killer[ply][1] &&
+        (fut || (SP_LMP && depth <= 3 && legal > SP_LMP + 2 * depth * depth))) { rep_n--; continue; }
     /* root randomness for weak levels: shift this move's window by its noise
        so bounds stay exact (adding noise to a fail-low bound would be wrong) */
     int nz = 0;

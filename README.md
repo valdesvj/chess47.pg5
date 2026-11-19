@@ -117,21 +117,22 @@ fell), **RESIGNS**. With USB on, the result also goes to the PC as a `result 1-0
 
 ## Strength (measured against Stockfish)
 
-**v1.2: a stronger search for both games, and a new Xiangqi evaluation.** Measured against v1.1 with the same
+**v1.1 updated (November 2026): a stronger search for both games, and a new Xiangqi evaluation.** Measured against the
+first v1.1 with the same
 node budget per move (random openings, both colours; `test/match.py --opponent`, `test/xq_match.py --full
 --opp-nodes`):
 
-| Change | Game | Nodes/move | Result vs v1.1 | Score | ≈ Elo |
+| Change | Game | Nodes/move | Result vs the first v1.1 | Score | ≈ Elo |
 |---|---|---:|---|---:|---:|
 | reverse futility, futility and late-move pruning (`src/search.inc`) | chess | 30 000 | +65 =21 −14 | 76% | +195 |
 | the same | chess | 100 000 | +23 =9 −8 | 69% | +135 |
 | new evaluation: mobility, attack on the general, central cannon, cannon/horse by phase | Xiangqi | 30 000 | +71 =15 −14 | 79% | +225 |
 | the new evaluation, at equal **time** (it costs 1.36× a node) | Xiangqi | 30 000 vs 41 000 | +62 =13 −25 | 69% | +135 |
 | the pruning, on top | Xiangqi | 30 000 | +62 =16 −22 | 70% | +150 |
-| **all of v1.2, at equal time** | **Xiangqi** | 30 000 vs 41 000 | **+80 =12 −8** | **86%** | **+310** |
+| **all of it, at equal time** | **Xiangqi** | 30 000 vs 41 000 | **+80 =12 −8** | **86%** | **+310** |
 
 Also fixed: the null move could let a child node write over its parent's move list (a stale offset), a rare
-wrong move in both games. The tables below were measured with v1.1; v1.2 is stronger in both games.
+wrong move in both games. The tables below were measured with the first v1.1; the update is stronger in both games.
 
 
 Chess 47 (PC build, same engine) against **Stockfish 16** with `UCI_LimitStrength`

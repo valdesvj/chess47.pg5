@@ -39,7 +39,7 @@ typedef struct {
 
 /* the main lines' best moves, kept apart from the hash table (which overwrites them): the "thinking" display's expected
    line. Written at the search's main-line (PV) nodes only; read by search_pv / xq_search_pv */
-typedef struct { uint64_t key; Move move; uint32_t pad; } PVE;
+typedef struct { uint64_t key; Move move; int8_t depth; uint8_t age; uint16_t pad; } PVE;   /* age: the search */
 #define PVH_N 512
 
 /* The tables the games share (one game plays at a time): the hash table, the move stacks, the killers, the

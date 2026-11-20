@@ -33,6 +33,7 @@ static uint32_t t0;
 static const Limits *L;
 static Move     root_best;
 static int      root_score;
+static uint8_t  pv_age;                /* the search's number: the main-line table's older entries give way */
 
 static void check_stop(void) {
   if (L->max_nodes && nodes >= L->max_nodes) { stop = 1; return; }
@@ -205,8 +206,10 @@ static int negamax(int ply, int depth, int alpha, int beta, int can_null) {
   if (!legal) return G_NOLEGAL(incheck, ply);
 
   if (pv && bm && best > orig && best < beta) {             /* a main-line node: its move kept for the display */
-    PVE *q = &pvh[p->key & (PVH_N - 1)];
-    q->key = p->key; q->move = bm;
+    PVE *q = &pvh[p->key & (PVH_N - 1)];                    /* the deeper kept (nearer the root), this search's */
+    if (q->age != pv_age || q->key == p->key || depth >= q->depth) {
+      q->key = p->key; q->move = bm; q->depth = (int8_t)depth; q->age = pv_age;
+    }
   }
   if (e->key != p->key || depth >= e->depth || best >= beta) {
     e->key = p->key;
@@ -245,6 +248,7 @@ Result SEARCH_NAME(const Pos *root, const uint64_t *keys, int nkeys, const Limit
   L = lim;
   stop = 0;
   nodes = 0;
+  pv_age++;
   t0 = lim->now ? lim->now() : 0;
 
   int n = gen_legal(root, scratch);

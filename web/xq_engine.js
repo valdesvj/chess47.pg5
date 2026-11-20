@@ -594,8 +594,10 @@ function negamax(ply, depth, alpha, beta, can_null) {
   if (!legal) return -MATE + ply;                       /* Xiangqi: no legal move loses, in check or not */
 
   if (pv && bm && best > orig && best < beta) {          /* a main-line node: its move kept for the display */
-    const q = p.lo & (PVH_N - 1);
-    pvhH[q] = p.hi; pvhL[q] = p.lo; pvhM[q] = bm;
+    const q = p.lo & (PVH_N - 1);                         /* the deeper kept (nearer the root), this search's */
+    if (pvhA[q] !== pv_age || (pvhH[q] === p.hi && pvhL[q] === p.lo) || depth >= pvhD[q]) {
+      pvhH[q] = p.hi; pvhL[q] = p.lo; pvhM[q] = bm; pvhD[q] = depth; pvhA[q] = pv_age;
+    }
   }
   if (ttH[e] !== p.hi || ttL[e] !== p.lo || depth >= ttD[e] || best >= beta) {
     ttH[e] = p.hi; ttL[e] = p.lo; ttM[e] = bm;
@@ -609,6 +611,8 @@ function negamax(ply, depth, alpha, beta, can_null) {
 /* the main lines' best moves, apart from the hash table (src/engine_common.h PVE): the "thinking" display's line */
 const PVH_N = 512;
 const pvhH = new Int32Array(PVH_N), pvhL = new Int32Array(PVH_N), pvhM = new Uint32Array(PVH_N);
+const pvhD = new Int8Array(PVH_N), pvhA = new Uint8Array(PVH_N);
+let pv_age = 0;                                           /* the search's number: older entries give way */
 /* the expected line: first, then each position's main-line move (else the hash table's), legal, until a repeat
    (src/search.inc search_pv): the tables are only read */
 function xq_search_pv(root, first, max) {
@@ -630,7 +634,7 @@ function xq_search_pv(root, first, max) {
    keys: [hi, lo] pairs of the game so far */
 function xq_search(root, keys, lim) {
   const R = { best: 0, score: 0, depth: 0, nodes: 0 };
-  L = lim; stop = 0; nodes = 0;
+  L = lim; stop = 0; nodes = 0; pv_age = (pv_age + 1) & 255;
   t0 = lim.now ? lim.now() : 0;
   const n = xq_gen_legal(root, scratch);
   if (!n) return R;

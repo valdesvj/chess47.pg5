@@ -36,8 +36,9 @@ const LEVELS = [
   { name: '7', depth: 40, ms: 5000, noise: 0 }, { name: '8', depth: 40, ms: 10000, noise: 0 }, { name: '9', depth: 40, ms: 30000, noise: 0 },
 ];
 const TCS = [
-  { name: 'OFF', base: 0, inc: 0 }, { name: '1+0', base: 60, inc: 0 }, { name: '3+2', base: 180, inc: 2 }, { name: '5+0', base: 300, inc: 0 },
-  { name: '10+0', base: 600, inc: 0 }, { name: '15+10', base: 900, inc: 10 }, { name: '30+0', base: 1800, inc: 0 }, { name: '60+0', base: 3600, inc: 0 },
+  /* tournament controls: 3+2 FIDE World Blitz, 15+10 FIDE World Rapid, 90+30 classical; 1+0 bullet (online) */
+  { name: 'OFF', base: 0, inc: 0 }, { name: '1+0', base: 60, inc: 0 }, { name: '3+2', base: 180, inc: 2 }, { name: '5+3', base: 300, inc: 3 },
+  { name: '10+5', base: 600, inc: 5 }, { name: '15+10', base: 900, inc: 10 }, { name: '25+10', base: 1500, inc: 10 }, { name: '90+30', base: 5400, inc: 30 },
 ];
 const DM42N_NPS = 19;                                     /* nodes per ms of the DM42n on USB power (README) */
 const MENU = [
@@ -75,14 +76,20 @@ const store = {
   set(k, v) { try { localStorage.setItem('chess47.' + k, JSON.stringify(v)); } catch (e) { /* private window */ } },
 };
 const cfg = Object.assign({ level: 4, mode: MODE_HC, human: WHITE, flip: 0, tc: 0, sound: 1, page: 0, calc: 1,
-                            game: 'chess', pstyle: 0, xstyle: 0, zoom: 0 }, store.get('cfg') || {});
+                            game: 'chess', pstyle: 0, xstyle: 0, zoom: 0, think: 1 }, store.get('cfg') || {});
 let xq = cfg.game === 'xq' ? 1 : 0;                       /* the game on the screen: 0 chess, 1 Xiangqi */
 let shift = 0;                                            /* SHIFT: the game menu on the soft keys */
 const G = { hist: [E.newPos()], moves: [], san: [], keys: [], n: 0, over: 0, pos960: -1, legal: [], start: null, rfile: [7, 0], c960: 0 };
 let cur = 0x14, sel = NOSQ, hint_from = NOSQ, hint_to = NOSQ, last_from = NOSQ, last_to = NOSQ;
 let status = '', promo_mode = 0, promo_opts = [0, 0, 0, 0], thinking = 0, kirk = 0, info_screen = 0;
+/* the CPU's thinking (SHIFT F6, cfg.think): { pv: the expected line's moves written, nodes, t0 } while it thinks */
+let think = null;
 let resigner = -1, offer = -1, confirm = '', cpu_score = 0, cpu_scored = 0;   /* RESIGN, DRAW, the CPU's view */
-let clk = [0, 0], turn_start = 0, clk_live = 0;
+/* the clock (src/main.c): clk the time left, or the time used when OFF (or stopped during the game: clk_off);
+   keep: each game's clock while the other is played ({ tc, off, t }: [0] chess, [1] Xiangqi) */
+let clk = [0, 0], turn_start = 0, clk_live = 0, clk_off = 0;
+const keep = [null, null];
+const TC = () => clk_off ? 0 : cfg.tc;                    /* this game's time control (0: the time used counts up) */
 let last = { depth: 0, nodes: 0, ms: 0, score: 0 };
 const CUR = () => G.hist[G.n];
 /* Xiangqi's game (kept while chess is played, and the other way round) */
@@ -114,14 +121,70 @@ function beep(hz, ms) {
 }
 
 /* ---- clock ---- */
-function clock_reset() { const t = TCS[cfg.tc]; clk = [t.base * 1000, t.base * 1000]; clk_live = 0; turn_start = now(); }
-function clock_left(side) { return clk_live && side === side_now() ? clk[side] - (now() - turn_start) : clk[side]; }
-function clock_update_live() { clk_live = cfg.tc && !over_now() && (xq ? XG.n : G.n) > 0 ? 1 : 0; if (clk_live) turn_start = turn_start || now(); }
+function clock_reset() { const t = TCS[TC()]; clk = [t.base * 1000, t.base * 1000]; clk_live = 0; turn_start = now(); }
+function clock_left(side) {
+  if (!clk_live || side !== side_now()) return clk[side];
+  const e = now() - turn_start;
+  return TC() ? clk[side] - e : clk[side] + e;
+}
+function clock_update_live() {                            /* OFF too: the time used counts up */
+  const want = !over_now() && (xq ? XG.n : G.n) > 0 ? 1 : 0;
+  if (want && !clk_live) turn_start = now();
+  clk_live = want;
+}
+/* a move played by mover: its time off (or added to its time used when OFF), then the increment; 1: its time ran out */
+function clock_move(mover) {
+  if (!clk_live) return 0;
+  const e = now() - turn_start;
+  if (!TC()) { clk[mover] += e; return 0; }
+  clk[mover] -= e;
+  if (clk[mover] <= 0) { clk[mover] = 0; clk_live = 0; beep(330, 400); return 1; }
+  clk[mover] += TCS[TC()].inc * 1000;
+  return 0;
+}
+/* CLOCK: before the first move it cycles the controls; during the game only OFF, with a second press (each side's
+   time left becomes its time used: the start + the increments - the time left), so a clock is never refilled during
+   a game; otherwise (the game over, a stopped clock) the control is chosen at NEW */
+function clock_key() {
+  const n = xq ? XG.n : G.n, over = over_now();
+  if (!n && !over) {
+    cfg.tc = (cfg.tc + 1) % TCS.length; clk_off = 0;
+    clock_reset(); clock_update_live();
+    status = 'Clock ' + TCS[cfg.tc].name;
+    return;
+  }
+  if (TC() && !over) {
+    if (confirm !== 'C') { confirm = 'C'; status = 'Stop clock? CLOCK'; return; }
+    confirm = '';
+    const first = xq ? XG.hist[0].side : G.hist[0].side, t = TCS[TC()];
+    clk = [0, 1].map(s => {
+      const incs = s === first ? Math.floor((n + 1) / 2) - 1 : Math.floor(n / 2);   /* none for the game's first move */
+      return Math.max(0, (t.base + t.inc * incs) * 1000 - clock_left(s));
+    });
+    clk_off = 1; turn_start = now();
+    status = 'Clock stopped';
+    save_auto();
+    return;
+  }
+  status = 'Clock: set at NEW';
+}
+/* game g's clock (0 chess, 1 Xiangqi): the game on the screen's, or kept */
+function clock_state(g) { return g === xq ? { tc: cfg.tc, off: clk_off, t: [clock_left(0), clock_left(1)] } : keep[g]; }
+function clock_restore(s) {                               /* a saved or kept clock ({ tc, off, t }) */
+  if (s.tc !== undefined && s.tc >= 0 && s.tc < TCS.length) cfg.tc = s.tc;
+  clk_off = s.off ? 1 : 0; clk = s.t.slice(); clk_live = 0; turn_start = now(); clock_update_live();
+}
+/* " W 12:34 ", or tighter when it does not fit half the panel (an hour or more: 1:30:00) */
+function clock_label(c, t, w) {
+  ctx.font = FONT;
+  const fits = s => ctx.measureText(s).width / S <= w;
+  return [` ${c} ${t} `, `${c} ${t}`].find(fits) || `${c}${t}`;
+}
 function fmt_clock(ms) {
   if (ms < 0) ms = 0;
-  const t = Math.floor((ms + 999) / 1000);
+  const t = TC() ? Math.floor((ms + 999) / 1000) : Math.floor(ms / 1000);   /* the time left up, the time used down */
   if (t >= 3600) return `${Math.floor(t / 3600)}:${String(Math.floor(t / 60) % 60).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
-  if (ms < 10000) return `${Math.floor(ms / 1000)}.${Math.floor(ms / 100) % 10}`;
+  if (ms < 10000 && TC()) return `${Math.floor(ms / 1000)}.${Math.floor(ms / 100) % 10}`;
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 }
 
@@ -140,6 +203,7 @@ function new_game_from(start, pos960) {
   sel = hint_from = hint_to = last_from = last_to = NOSQ;
   cur = cfg.flip ? 0x64 : 0x14;
   status = ''; promo_mode = 0;
+  clk_off = 0;
   clock_reset();
   refresh_legal();
   worker_call({ cmd: 'newgame' });
@@ -175,11 +239,7 @@ function do_move(m) {
   if (G.n >= E.MAXGAME) { status = 'Game too long'; return; }
   geometry();
   const p = CUR(), mover = p.side;
-  if (clk_live) {
-    clk[mover] -= now() - turn_start;
-    if (clk[mover] <= 0) { clk[mover] = 0; G.over = 6; clk_live = 0; beep(330, 400); return; }
-    clk[mover] += TCS[cfg.tc].inc * 1000;
-  }
+  if (clock_move(mover)) { G.over = 6; return; }
   turn_start = now();
   if (offer >= 0 && mover !== offer) offer = -1;            /* 2 players: moving declines the other side's offer */
   G.san[G.n] = E.move_to_san(p, m);
@@ -247,7 +307,11 @@ function worker_main() {                                  /* runs inside the wor
       const t0 = performance.now();
       const r = X.xq_search(q, keys, {
         depth: d.depth, time_ms: d.ms, noise: d.noise, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
-        info: (depth, score, nodes, best) => self.postMessage({ type: 'info', depth, score, nodes, best, san: X.xq_move_to_wxf(q, best) }),
+        info: (depth, score, nodes, best) => {
+          const pv = []; let a = q;
+          for (const m of X.xq_search_pv(q, best, 12)) { pv.push(X.xq_move_to_wxf(a, m)); const n = X.newPos(); X.xq_make_move(a, n, m); a = n; }
+          self.postMessage({ type: 'info', depth, score, nodes, best, san: X.xq_move_to_wxf(q, best), pv });
+        },
       });
       self.postMessage({ type: 'done', best: r.best, score: r.score, depth: r.depth, nodes: r.nodes, ms: performance.now() - t0 });
       return;
@@ -263,7 +327,11 @@ function worker_main() {                                  /* runs inside the wor
     const t0 = performance.now();
     const r = E.search(q, keys, {
       depth: d.depth, time_ms: d.ms, noise: d.noise, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
-      info: (depth, score, nodes, best) => self.postMessage({ type: 'info', depth, score, nodes, best, san: E.move_to_san(q, best) }),
+      info: (depth, score, nodes, best) => {
+        const pv = []; let a = q;
+        for (const m of E.search_pv(q, best, 12)) { pv.push(E.move_to_san(a, m)); const n = E.newPos(); E.make_move(a, n, m); a = n; }
+        self.postMessage({ type: 'info', depth, score, nodes, best, san: E.move_to_san(q, best), pv });
+      },
     });
     self.postMessage({ type: 'done', best: r.best, score: r.score, depth: r.depth, nodes: r.nodes, ms: performance.now() - t0 });
   };
@@ -280,6 +348,32 @@ function run_search(depth, ms, noise, oninfo) {
                   max_nodes: cfg.calc && ms ? max_nodes : 0 });
   });
 }
+/* a depth done: the line, the counts, its first move marked (the hint's marks), when the thinking is shown */
+function think_info(d) {
+  if (!cfg.think || !think) return;
+  think.pv = d.pv || []; think.nodes = d.nodes;
+  if (xq) { xhint_from = X.XFROM(d.best); xhint_to = X.XTO(d.best); }
+  else { hint_from = MFROM(d.best); hint_to = MFLAGS(d.best) & F_CASTLE ? E.castle_rook_sq(CUR(), d.best) : MTO(d.best); }
+}
+const fmt_count = n => n < 10000 ? String(n) : n < 1e6 ? Math.floor(n / 1000) + 'k' : (Math.floor(n / 1e5) / 10).toFixed(1) + 'M';
+/* the thinking block in the panel: the line wrapped to w (two lines at most), the counts, a line under it; the y below */
+function draw_think(y, w) {
+  if (!(thinking && cfg.think && think && think.pv.length)) return y;
+  ctx.font = FONT;
+  const fits = t => ctx.measureText(t).width / S <= w;
+  let line = '', ln = 0;
+  for (const m of think.pv) {
+    const t = line ? line + ' ' + m : m;
+    if (line && !fits(t)) { ptext(2, y, line, 0); y += LH; if (++ln === 2) { line = ''; break; } line = m; }
+    else line = t;
+  }
+  if (line) { ptext(2, y, line, 0); y += LH; }
+  const ms = now() - think.t0;
+  ptext(2, y, `${fmt_count(think.nodes)}  ${fmt_count(ms ? Math.floor(think.nodes * 1000 / ms) : 0)}/s  ${(Math.floor(ms / 100) / 10).toFixed(1)}s`, 0);
+  y += LH + 2;
+  fill(2, y, w, 1, 1);
+  return y + 3;
+}
 function move_now_discard() {                             /* stop thinking, no move (resign, new game) */
   if (!wjob) return;
   const j = wjob; wjob = null; thinking = 0; worker.terminate(); worker = null;
@@ -293,9 +387,9 @@ function move_now() {                                     /* EXIT while thinking
 }
 
 function think_time(level_ms) {
-  if (!cfg.tc) return level_ms;
+  if (!TC()) return level_ms;
   const left = clock_left(side_now());
-  let t = left / 25 + TCS[cfg.tc].inc * 750;
+  let t = left / 25 + TCS[TC()].inc * 750;
   if (t > left / 3) t = left / 3;
   if (t < 50) t = 50;
   if (level_ms && t > level_ms) t = level_ms;
@@ -330,14 +424,15 @@ async function cpu_move() {
     await sleep(250);
     m = G.legal[Math.floor(Math.random() * G.legal.length)];
   } else {
-    thinking = 1; status = 'Thinking...'; redraw();
+    thinking = 1; status = 'Thinking...'; think = { pv: [], nodes: 0, t0: now() }; redraw();
     const n0 = G.n;
     const r = await run_search(L.depth, think_time(L.ms), L.noise, d => {
+      think_info(d);
       status = E.IS_MATE(d.score) ? `d${d.depth} ${d.san} M${d.score < 0 ? '-' : ''}${Math.floor((E.MATE - Math.abs(d.score) + 1) / 2)}`
                                   : `d${d.depth} ${d.san} ${d.score >= 0 ? '+' : '-'}${Math.floor(Math.abs(d.score) / 100)}.${String(Math.abs(d.score) % 100).padStart(2, '0')}`;
       redraw();
     });
-    thinking = 0;
+    thinking = 0; think = null;
     if (r.discard || G.n !== n0 || G.over) return;        /* stopped (resign, draw, new game) */
     last = { depth: r.depth, nodes: r.nodes, ms: r.ms, score: r.score };
     m = r.best || G.legal[0];
@@ -419,8 +514,9 @@ function copy(text) { try { navigator.clipboard.writeText(text); return 1; } cat
 function serialize() {
   geometry();
   return { start: G.start, rfile: G.rfile, c960: G.c960, pos960: G.pos960, kirk, resigner,
-           moves: G.moves.slice(0, G.n).map((m, i) => E.move_to_str(G.hist[i], m)), over: G.over === 7 || G.over === 9 ? G.over : 0, clk };
+           moves: G.moves.slice(0, G.n).map((m, i) => E.move_to_str(G.hist[i], m)), over: G.over === 7 || G.over === 9 ? G.over : 0, ...clock_save(0) };
 }
+function clock_save(g) { const c = clock_state(g); return c ? { clk: c.t, tc: c.tc, off: c.off } : {}; }
 function deserialize(s) {
   if (!s || !s.start) return 0;
   E.c_rfile[0] = s.rfile[0]; E.c_rfile[1] = s.rfile[1]; E.chess960 = s.c960;
@@ -431,7 +527,8 @@ function deserialize(s) {
   kirk = s.kirk || 0;
   for (const u of s.moves) { const m = E.str_to_move(CUR(), u); if (!m) break; do_move(m); }
   if (s.over === 7 || s.over === 9) { G.over = s.over; resigner = s.resigner ?? -1; clk_live = 0; }
-  if (s.clk && cfg.tc) { clk = s.clk.slice(); turn_start = now(); }
+  if (s.clk && s.tc !== undefined) { clock_restore({ tc: s.tc, off: s.off, t: s.clk }); save_auto(); }   /* its own clock (the replay saved others) */
+  else if (s.clk && cfg.tc) { clk = s.clk.slice(); turn_start = now(); }                /* saved before v1.2 */
   last_from = last_to = NOSQ;
   if (G.n) { last_from = MFROM(G.moves[G.n - 1]); last_to = MTO(G.moves[G.n - 1]); }
   status = '';
@@ -519,7 +616,8 @@ function softkey(fn) {
     return;
   }
   const k = cfg.page * 6 + fn;
-  if (!((k === 9 && confirm === 'R') || ((k === 10 || k === 4) && confirm === 'A') || (k === 0 && confirm === 'N'))) confirm = '';
+  if (!((k === 9 && confirm === 'R') || ((k === 10 || k === 4) && confirm === 'A') || (k === 0 && confirm === 'N') ||
+        (k === 7 && confirm === 'C'))) confirm = '';
   if (fn === 5) { cfg.page = (cfg.page + 1) % 3; store.set('cfg', cfg); return; }
   if (thinking && !(k === 0 || k === 9 || k === 10)) { status = 'Thinking... (Esc: move now)'; return; }
   switch (k) {
@@ -535,7 +633,7 @@ function softkey(fn) {
   case 3: undo(); break;
   case 4: if (accept_pending()) draw(); else hint(); break;
   case 6: if (G.c960) { new_game(-1); status = 'Normal chess'; } else ask_960(); break;
-  case 7: cfg.tc = (cfg.tc + 1) % TCS.length; clock_reset(); clock_update_live(); status = 'Clock ' + TCS[cfg.tc].name; break;
+  case 7: clock_key(); break;
   case 8: cfg.human ^= 1; cfg.flip = cfg.human; if (cfg.mode !== MODE_HC) cfg.mode = MODE_HC; sel = NOSQ;
           status = 'You play ' + (cfg.human ? 'Black' : 'White'); break;
   case 9: resign(0); break;
@@ -598,7 +696,7 @@ function xq_new_game_from(fen) {
   xresigner = offer = -1; confirm = ''; xcpu_score = 0;
   xcur = X.XSQ(7, 2);                                     /* Red's cannon: C2=5 is the most common first move */
   xseven = fen === XQ_SEVEN ? 1 : 0;
-  status = ''; clock_reset(); xq_refresh_legal();
+  status = ''; clk_off = 0; clock_reset(); xq_refresh_legal();
   worker_call({ cmd: 'newgame' });
   return 1;
 }
@@ -635,11 +733,7 @@ function xq_result(code) {
 function xq_do_move(m) {
   if (XG.n >= X.MAXGAME) { status = 'Game too long'; return; }
   const p = XCUR(), mover = p.side;
-  if (clk_live) {
-    clk[mover] -= now() - turn_start;
-    if (clk[mover] <= 0) { clk[mover] = 0; XG.over = 6; clk_live = 0; beep(330, 400); return; }
-    clk[mover] += TCS[cfg.tc].inc * 1000;
-  }
+  if (clock_move(mover)) { XG.over = 6; return; }
   turn_start = now();
   if (offer >= 0 && mover !== offer) offer = -1;            /* moving declines the other side's draw offer */
   XG.wxf[XG.n] = X.xq_move_to_wxf(p, m);
@@ -715,10 +809,10 @@ async function xq_cpu_move() {
   }
   if (cfg.level === 0) { await sleep(250); m = XG.legal[Math.floor(Math.random() * XG.legal.length)]; }
   else {
-    thinking = 1; status = 'Thinking...'; redraw();
+    thinking = 1; status = 'Thinking...'; think = { pv: [], nodes: 0, t0: now() }; redraw();
     const n0 = XG.n;
-    const r = await run_search(L.depth, think_time(L.ms), L.noise, d => { status = score_text(d); redraw(); });
-    thinking = 0;
+    const r = await run_search(L.depth, think_time(L.ms), L.noise, d => { think_info(d); status = score_text(d); redraw(); });
+    thinking = 0; think = null;
     if (r.discard || XG.n !== n0 || XG.over || !xq) return;
     last = { depth: r.depth, nodes: r.nodes, ms: r.ms, score: r.score };
     m = r.best || XG.legal[0];
@@ -782,7 +876,7 @@ function xq_draw_offer() {
 
 function xq_softkey(fn) {
   const k = cfg.page * 6 + fn;
-  if (!((k === 9 && confirm === 'R') || (k === 10 && confirm === 'A'))) confirm = '';
+  if (!((k === 9 && confirm === 'R') || (k === 10 && confirm === 'A') || (k === 7 && confirm === 'C'))) confirm = '';
   if (fn === 5) { cfg.page = (cfg.page + 1) % 3; store.set('cfg', cfg); return; }
   if (thinking && !(k === 0 || k === 9 || k === 10 || k === 6 || k === 12)) { status = 'Thinking... (Esc: move now)'; return; }
   switch (k) {
@@ -792,7 +886,7 @@ function xq_softkey(fn) {
   case 3: xq_undo(); break;
   case 4: xq_hint(); break;
   case 6: piece_style(); break;
-  case 7: cfg.tc = (cfg.tc + 1) % TCS.length; clock_reset(); clock_update_live(); status = 'Clock ' + TCS[cfg.tc].name; break;
+  case 7: clock_key(); break;
   case 8: cfg.human ^= 1; cfg.flip = cfg.human; if (cfg.mode !== MODE_HC) cfg.mode = MODE_HC; xsel = -1;
           status = 'You play ' + (cfg.human ? 'Black' : 'Red'); break;
   case 9: xq_resign(0); break;
@@ -823,24 +917,27 @@ function xq_key(k) {
 function xq_serialize() {
   if (!XG.hist.length) return null;
   return { start: XG.start, moves: XG.moves.slice(0, XG.n).map(m => X.xq_move_to_str(m, 1)),
-           over: XG.over === 7 || XG.over === 8 ? XG.over : 0, resigner: xresigner };
+           over: XG.over === 7 || XG.over === 8 ? XG.over : 0, resigner: xresigner, ...clock_save(1) };
 }
 function xq_deserialize(s) {
   if (!s || !s.start || !xq_new_game_from(s.start)) return 0;
   for (const u of s.moves) { const m = X.xq_str_to_move(XCUR(), u); if (!m) break; xq_do_move(m); }
   if (s.over) { XG.over = s.over; xresigner = s.resigner ?? -1; clk_live = 0; }
+  if (s.clk && s.tc !== undefined) { clock_restore({ tc: s.tc, off: s.off, t: s.clk }); save_auto(); }   /* its own clock (v1.2) */
   status = '';
   return 1;
 }
 
 /* ---- the games' menu (SHIFT) ---- */
-function game_switch() {                                  /* chess <-> Xiangqi, each keeps its game */
+function game_switch() {                                  /* chess <-> Xiangqi, each keeps its game and its clock */
   if (thinking) move_now_discard();
+  keep[xq] = clock_state(xq);                             /* a clock waits while its game is put aside */
   xq ^= 1; cfg.game = xq ? 'xq' : 'chess';
   offer = -1; confirm = '';
-  if (xq && !XG.hist.length && !xq_deserialize(store.get('xq'))) xq_new_game_from(XQ_START);
+  let fresh = 0;                                          /* Xiangqi the first time: its saved game and clock */
+  if (xq && !XG.hist.length) { fresh = 1; if (!xq_deserialize(store.get('xq'))) xq_new_game_from(XQ_START); }
   if (!xq) refresh_legal();
-  clock_reset(); clock_update_live();
+  if (!fresh) { if (keep[xq]) clock_restore(keep[xq]); else { clk_off = 0; clock_reset(); clock_update_live(); } }
   worker_call({ cmd: 'newgame' });
   status = xq ? 'Xiangqi' : 'Chess';
   save_auto();
@@ -860,6 +957,7 @@ function game_menu(fn) {
   case 2: zoom_toggle(); break;
   case 3: if (xq) xq_resign(0); else resign(0); break;
   case 4: if (xq) xq_draw_offer(); else draw(); break;
+  case 5: cfg.think ^= 1; status = cfg.think ? 'Thinking shown' : 'Thinking hidden'; store.set('cfg', cfg); break;
   }
 }
 
@@ -918,11 +1016,11 @@ function xq_draw_board() {
 }
 function xq_draw_panel() {
   const h = LH;
-  if (!cfg.tc) ptext(2, 1, 'XIANGQI 47', 1);
+  if (!TC() && !XG.n) ptext(2, 1, 'XIANGQI 47', 1);      /* OFF: the title, then the time used */
   else {
     const stm = XCUR().side;
-    ptext(0, 1, ' R ' + fmt_clock(clock_left(0)) + ' ', stm === 0 && !XG.over);
-    ptext((XPANEL >> 1) + 2, 1, ' B ' + fmt_clock(clock_left(1)) + ' ', stm === 1 && !XG.over);
+    ptext(0, 1, clock_label('R', fmt_clock(clock_left(0)), (XPANEL >> 1) - 1), stm === 0 && !XG.over);
+    ptext((XPANEL >> 1) + 2, 1, clock_label('B', fmt_clock(clock_left(1)), (XPANEL >> 1) - 1), stm === 1 && !XG.over);
     fill(XPANEL >> 1, 0, 1, h + 2, 1);
   }
   let y = h + 4;
@@ -944,6 +1042,7 @@ function xq_draw_panel() {
       if (XB.seven[k][yy] >> (15 - x) & 1) fill(4 + k * 18 + x, y + 1 + yy, 1, 1, 1);
     y += 18;
   }
+  y = draw_think(y, XPANEL - 4);                          /* the CPU's thinking, above the moves */
   const crazy = cfg.level === 0 && cfg.mode !== MODE_HH, pbot = cfg.zoom ? LCD_Y : MENU_Y;
   const bottom = crazy ? pbot - 50 : pbot - 2, lines = Math.max(1, Math.floor((bottom - y) / h));
   const total = (XG.n + 1) >> 1, first = Math.max(0, total - lines);
@@ -1041,14 +1140,14 @@ const material = () => { const v = [0, 1, 3, 3, 5, 9, 0]; let s = 0; const b = C
 
 function draw_panel() {
   const h = LH;
-  if (!cfg.tc) {
+  if (!TC() && !G.n) {                                    /* OFF: the title until the first move, then the time used */
     ptext(2, 1, 'CHESS 47', 1);
     const s = G.pos960 >= 0 ? '960 #' + G.pos960 : G.c960 ? 'FEN' : 'web';
     ctx.font = FONT; ptext(PANEL_W - Math.ceil(ctx.measureText(s).width / S), 1, s, 0);
   } else {
     const stm = CUR().side;
-    ptext(0, 1, ' W ' + fmt_clock(clock_left(WHITE)) + ' ', stm === WHITE && !G.over);
-    ptext(PANEL_W / 2 + 2, 1, ' B ' + fmt_clock(clock_left(BLACK)) + ' ', stm === BLACK && !G.over);
+    ptext(0, 1, clock_label('W', fmt_clock(clock_left(WHITE)), PANEL_W / 2 - 1), stm === WHITE && !G.over);
+    ptext(PANEL_W / 2 + 2, 1, clock_label('B', fmt_clock(clock_left(BLACK)), PANEL_W / 2 - 1), stm === BLACK && !G.over);
     fill(PANEL_W / 2, 0, 1, h + 2, 1);
   }
   let y = h + 4;
@@ -1067,6 +1166,7 @@ function draw_panel() {
   y += h + 2;
   fill(2, y, PANEL_W - 4, 1, 1);
   y += 3;
+  y = draw_think(y, PANEL_W - 4);                         /* the CPU's thinking, above the moves */
   const crazy = cfg.level === 0 && cfg.mode !== MODE_HH;
   const bottom = crazy ? BOARD_PX - 46 : BOARD_PX - h;
   const lines = Math.max(1, Math.floor((bottom - y) / h));
@@ -1092,7 +1192,7 @@ const menu_boxes = [];
 /* SHIFT: the game menu, the same in both games: the other game, the pieces' style, the zoom, RESIGN, DRAW */
 function game_menu_keys() {
   const acc = cfg.mode === MODE_HH && offer === (side_now() ^ 1) && !over_now();
-  return [xq ? 'CHESS' : 'XIANGQI', 'PIECES', cfg.zoom ? 'NORMAL' : 'ZOOM', 'RESIGN', acc ? 'ACCEPT' : 'DRAW', ''];
+  return [xq ? 'CHESS' : 'XIANGQI', 'PIECES', cfg.zoom ? 'NORMAL' : 'ZOOM', 'RESIGN', acc ? 'ACCEPT' : 'DRAW', 'THINK'];
 }
 function draw_menu() {
   menu_boxes.length = 0;
@@ -1221,7 +1321,7 @@ async function tick_game() {
 setInterval(() => {
   if (clk_live && !over_now()) {
     const sd = side_now();
-    if (clock_left(sd) <= 0) { clk[sd] = 0; if (xq) XG.over = 6; else G.over = 6; clk_live = 0; beep(330, 400); if (thinking) move_now(); }
+    if (TC() && clock_left(sd) <= 0) { clk[sd] = 0; if (xq) XG.over = 6; else G.over = 6; clk_live = 0; beep(330, 400); if (thinking) move_now(); }
     redraw();
   }
 }, 250);
@@ -1230,7 +1330,7 @@ setInterval(() => {
 const start_xq = xq;
 xq = 0;                                                   /* chess's game first (it is always there) */
 if (!deserialize(store.get('auto'))) new_game(-1); else status = G.n ? 'Game resumed' : '';
-if (start_xq) { xq = 1; if (!xq_deserialize(store.get('xq'))) xq_new_game_from(XQ_START); else status = XG.n ? 'Game resumed' : ''; }
+if (start_xq) { keep[0] = clock_state(0); xq = 1; if (!xq_deserialize(store.get('xq'))) xq_new_game_from(XQ_START); else status = XG.n ? 'Game resumed' : ''; }
 redraw();
 tick_game();
 })();

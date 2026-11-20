@@ -3,7 +3,7 @@
  * a fake DMCP5 layer and renders the 400x240 LCD.
  *
  * usage: sim KEY KEY ... SNAP:name ...
- *   keys: F1..F6 0..9 ENTER EXIT BSP UP DOWN SHIFT SIGMA, WAIT:ms (fake time); HOSTL: the PC sends L on the
+ *   keys: F1..F6 0..9 ENTER EXIT BSP UP DOWN SHIFT SIGMA, WAIT:ms (fake time), PAUSE:ms (real time, the program runs on); HOSTL: the PC sends L on the
  *         serial console (DMCP marks every row unsent and gives the program key 77)
  *   SNAP:name writes name.pbm (framebuffer) and name.txt (text draw list)
  * Text is drawn later by render.py with a real font; widths here are fixed.
@@ -171,11 +171,16 @@ static int parse_key(const char *s) {
   for (unsigned i = 0; i < sizeof map / sizeof *map; i++) if (!strcmp(map[i].n, s)) return map[i].k;
   return -1;
 }
-/* advance the script until a key is available (handles SNAP/WAIT) */
+/* PAUSE:ms: real time passes with no key (the program runs on: a search can be photographed while it thinks) */
+static uint64_t pause_until;
+static uint64_t real_ms(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000; }
+/* advance the script until a key is available (handles SNAP/WAIT/PAUSE) */
 static void fill(void) {
   if (idle) return;
+  if (pause_until) { if (real_ms() < pause_until) return; pause_until = 0; }
   while (pending < 0 && spos < nscript) {
     const char *t = script[spos++];
+    if (!strncmp(t, "PAUSE:", 6)) { pause_until = real_ms() + (uint64_t)atoi(t + 6); return; }
     if (!strncmp(t, "SNAP:", 5)) snap(t + 5);
     else if (!strncmp(t, "WAIT:", 5)) { fake_ms += (uint32_t)atoi(t + 5); idle = 1; return; }
     else if (!strcmp(t, "HOSTL")) { sim_host_L(); pending = 77; }
@@ -185,7 +190,7 @@ static void fill(void) {
 int key_empty(void) { fill(); return pending < 0; }
 int key_pop(void) { fill(); int k = pending; pending = -1; return k; }
 void wait_for_key_press(void) { if (key_empty()) exit(0); key_pop(); }
-void sys_sleep(void) { if (idle) { idle = 0; return; } if (key_empty()) { fprintf(stderr, "script done\n"); exit(0); } }
+void sys_sleep(void) { if (idle) { idle = 0; return; } while (pause_until && real_ms() < pause_until) { struct timespec d = { 0, 1000000 }; nanosleep(&d, 0); } if (key_empty()) { fprintf(stderr, "script done\n"); exit(0); } }
 
 void program_main(void);
 int main(int argc, char **argv) {

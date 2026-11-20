@@ -204,6 +204,10 @@ static int negamax(int ply, int depth, int alpha, int beta, int can_null) {
   }
   if (!legal) return G_NOLEGAL(incheck, ply);
 
+  if (pv && bm && best > orig && best < beta) {             /* a main-line node: its move kept for the display */
+    PVE *q = &pvh[p->key & (PVH_N - 1)];
+    q->key = p->key; q->move = bm;
+  }
   if (e->key != p->key || depth >= e->depth || best >= beta) {
     e->key = p->key;
     e->move = bm;
@@ -212,6 +216,27 @@ static int negamax(int ply, int depth, int alpha, int beta, int can_null) {
     e->flag = best >= beta ? TT_LOWER : best <= orig ? TT_UPPER : TT_EXACT;
   }
   return best;
+}
+
+/* the expected line (the "thinking" display): first, then each position's main-line move (pvh, else the hash table),
+   while the entry is that position's (the full key) and the move legal; at a repeated position it ends. The tables
+   are only read: the search and its moves are not changed */
+int PV_NAME(const Pos *root, Move first, Move *pv, int max) {
+  Pos p = *root, n;
+  uint64_t seen[16];
+  int k = 0;
+  Move m = first;
+  while (m && k < max && k < 16) {
+    if (!make_move(&p, &n, m)) break;
+    for (int i = 0; i < k; i++) if (seen[i] == n.key) return k;
+    seen[k] = n.key;
+    pv[k++] = m;
+    p = n;
+    const PVE *q = &pvh[p.key & (PVH_N - 1)];
+    const TTE *e = &tt[p.key & (tt_n - 1)];
+    m = q->key == p.key ? q->move : e->key == p.key ? e->move : 0;
+  }
+  return k;
 }
 
 Result SEARCH_NAME(const Pos *root, const uint64_t *keys, int nkeys, const Limits *lim) {

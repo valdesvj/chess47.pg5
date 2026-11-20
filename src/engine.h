@@ -77,6 +77,7 @@ int  game_state(const Pos *p, const uint64_t *keys, int nkeys);
 
 /* Search */
 Result search(const Pos *root, const uint64_t *keys, int nkeys, const Limits *lim);
+int  search_pv(const Pos *root, Move first, Move *pv, int max);   /* the expected line after a search's depth */
 int  evaluate(const Pos *p);
 
 

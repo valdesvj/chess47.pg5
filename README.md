@@ -74,7 +74,7 @@ draw. The famous line starts 炮二平四 卒5平6 兵四進一 將6進1 俥三�
 | **←** (backspace) | take back (two plies vs the CPU) |
 | **F1…F6** | soft keys (3 pages, `>>` switches page) |
 | **+** or **−** | zoom: the board the full screen height (30 px squares), the soft keys hidden (they still work); again: the normal view |
-| **SHIFT** | the game menu on the soft keys (also in the zoom): F1 XIANGQI / CHESS, F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW; **SHIFT 7** the Seven Stars (Xiangqi) |
+| **SHIFT** | the game menu on the soft keys (also in the zoom): F1 XIANGQI / CHESS, F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW, F6 THINK; **SHIFT 7** the Seven Stars (Xiangqi) |
 | **×** | the pieces: figures / letters (Xiangqi: characters / symbols / letters) |
 | **SHIFT EXIT** | power off. The game is autosaved and resumed at power on |
 | **SHIFT 0** | setup: time/date, beep, USB disk, **System**, About |
@@ -83,6 +83,7 @@ draw. The famous line starts 炮二平四 卒5平6 兵四進一 將6進1 俥三�
 | **SHIFT F5** DRAW | offer a draw. The CPU accepts when it is worse, or from move 20 when it is not better. With 2 players the other side sees **ACCEPT** on F5 on its turn (press twice); a move declines |
 | **NEW** in a game | against the CPU an unfinished game counts as resigned: NEW twice (the result shows), NEW again for the next game |
 | **SHIFT Σ+** | info screen |
+| **SHIFT F6** THINK | the CPU's thinking on / off (on at the start). While it thinks, after each depth: the status line `d14 e5 +0.18` (depth, best move, score); under it the **expected line** (its move, your reply, ... up to 12 moves, two lines), the **counts** (positions searched, positions a second, time: `2.6M  459k/s  5.8s`), and its **move marked on the board** (the HINT's frames). Off: the status line only. Also in Xiangqi (WXF) and the web version. The line is the search's main line, kept in its own small table: the search plays exactly as before (test/bench_chess.txt) |
 
 Castling: select the king, then press on the **rook**. In classic games you can
 also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Knight.
@@ -99,8 +100,20 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
   depth plus randomness) and 4–9 (0.5 s → 30 s per move). Levels 4+ use a small opening book.
 * **960**: type a Chess960 position number 0–959 and press ENTER. ENTER alone picks a random one.
   NEW then deals another random 960 position.
-* **CLOCK**: OFF, 1+0, 3+2, 5+0, 10+0, 15+10, 30+0, 60+0, shown at the top left.
-  The clock pauses while the calculator is off. The CPU manages its own time.
+* **CLOCK**: OFF, 1+0, 3+2, 5+3, 10+5, 15+10, 25+10, 90+30 (minutes + seconds a move), shown at the top left;
+  the tournament controls: 3+2 is FIDE's World Blitz, 15+10 FIDE's World Rapid, 90+30 classical (1+0 is bullet).
+  The clock starts after the first move (it is free). The clock pauses while the calculator is off. The CPU
+  manages its own time, and its clock runs while it thinks. The same clock in Xiangqi.
+  * Before the first move CLOCK cycles the controls. During a game it only stops the clock, with a second
+    press ("Stop clock? CLOCK"; any other key cancels): a clock is never refilled during a game. After that, or
+    when the game is over, the control is chosen at NEW.
+  * OFF: the title until the first move, then each side's **time used**, counting up (nobody loses on time);
+    a clock stopped during the game shows the time each side has used so far. SAVE / LOAD keep it.
+  * Chess and Xiangqi each keep their own clock (control, times, stopped or not): SHIFT F1 puts one game and its
+    clock aside, the clock waiting, and brings the other back as it was. The web version does the same and keeps
+    both clocks when the page is closed.
+  * Games saved by v1.1 load with the control at the same place in the list (5+0 becomes 5+3, 10+0 10+5,
+    30+0 25+10, 60+0 90+30) and their clocks' time left as it was.
 * **MODE**: You vs CPU / 2 players / CPU vs CPU demo / You vs USB / CPU vs USB (below). **SIDE** swaps colours.
 * **SAVE/LOAD**: `/CHESS47/GAME.TXT`. **PGN** writes `/CHESS47/GAME.PGN`
   (with `[Variant "Chess960"]` and `[FEN]` tags when needed).

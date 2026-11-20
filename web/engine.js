@@ -71,7 +71,7 @@ function eng_init(entries) {
   const z = next(); zsH = Number(z >> 32n) | 0; zsL = Number(z & 0xffffffffn) | 0;
   eng_clear_tt();
 }
-function eng_clear_tt() { ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); hh.fill(0); killer.fill(0); }
+function eng_clear_tt() { pvhH.fill(0); pvhL.fill(0); pvhM.fill(0); ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); hh.fill(0); killer.fill(0); }
 
 /* ---- position helpers ---- */
 function compute_key(p) {
@@ -715,6 +715,10 @@ function negamax(ply, depth, alpha, beta, can_null) {
   }
   if (!legal) return incheck ? -MATE + ply : 0;
 
+  if (pv && bm && best > orig && best < beta) {          /* a main-line node: its move kept for the display */
+    const q = p.lo & (PVH_N - 1);
+    pvhH[q] = p.hi; pvhL[q] = p.lo; pvhM[q] = bm;
+  }
   if (ttH[e] !== p.hi || ttL[e] !== p.lo || depth >= ttD[e] || best >= beta) {
     ttH[e] = p.hi; ttL[e] = p.lo; ttM[e] = bm;
     ttS[e] = score_to_tt(best, ply);
@@ -722,6 +726,26 @@ function negamax(ply, depth, alpha, beta, can_null) {
     ttF[e] = best >= beta ? TT_LOWER : best <= orig ? TT_UPPER : TT_EXACT;
   }
   return best;
+}
+
+/* the main lines' best moves, apart from the hash table (src/engine_common.h PVE): the "thinking" display's line */
+const PVH_N = 512;
+const pvhH = new Int32Array(PVH_N), pvhL = new Int32Array(PVH_N), pvhM = new Uint32Array(PVH_N);
+/* the expected line: first, then each position's main-line move (else the hash table's), legal, until a repeat
+   (src/search.inc search_pv): the tables are only read */
+function search_pv(root, first, max) {
+  const pv = [], seen = new Set();
+  let p = copyPos(newPos(), root), m = first;
+  while (m && pv.length < max && pv.length < 16) {
+    const n = newPos();
+    if (!make_move(p, n, m)) break;
+    const k = n.hi + ',' + n.lo;
+    if (seen.has(k)) break;
+    seen.add(k); pv.push(m); p = n;
+    const q = p.lo & (PVH_N - 1), e = p.lo & (tt_n - 1);
+    m = pvhH[q] === p.hi && pvhL[q] === p.lo ? pvhM[q] : ttH[e] === p.hi && ttL[e] === p.lo ? ttM[e] : 0;
+  }
+  return pv;
 }
 
 /* lim: { depth, time_ms, noise, seed, max_nodes, now(), poll(), info(depth, score, nodes, best) };
@@ -761,7 +785,7 @@ Object.assign(E, {
   WHITE, BLACK, BLK, NOSQ, INF, MATE, MV, MFROM, MTO, MPROMO, MFLAGS, PTYPE, PCOLOR, SQ, FILE_OF, RANK_OF, ONBOARD,
   IS_MATE, newPos, copyPos, ksq, eng_init, eng_clear_tt, pos_from_fen, pos_to_fen, pos_start, pos_960, attacked,
   in_check, insufficient, gen_moves, gen_legal, make_move, perft, castle_rook_sq, move_to_str, str_to_move,
-  move_to_san, game_state, evaluate, search, sqname,
+  move_to_san, game_state, evaluate, search, search_pv, sqname,
 });
 G.Chess47 = E;
 if (typeof module !== 'undefined') module.exports = E;

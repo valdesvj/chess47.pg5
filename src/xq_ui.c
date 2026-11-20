@@ -46,6 +46,7 @@ static int xpy(int r) { return XY0 + (cfg.flip ? r : 9 - r) * XGAP; }
 
 static int xq_side(void) { return XG->cur.side; }
 static int xq_over_n(int *n) { *n = XG->n; return XG->over; }
+static int xq_first_side(void) { return XG->start.side; }
 
 static void xq_refresh_legal(void) { XG->nlegal = xq_gen_legal(&XG->cur, XG->legal); }
 
@@ -58,6 +59,7 @@ static void xq_new_game_at(const char *fen) {
   xsel = xhint_from = xhint_to = xlast_from = xlast_to = -1;
   xcur = XSQ(7, 2);                                     /* Red's cannon: C2=5 is the most common first move */
   status[0] = 0;
+  clk_off = 0;
   clock_reset();
   eng_clear_tt();
   xq_refresh_legal();
@@ -200,13 +202,13 @@ static const char *xq_result(int code, int loser) {
 static void xq_draw_clock(void) {
   int h = lh(t20) + 2;
   lcd_fill_rect(0, 0, XPANEL + 1, h, 0);
-  if (!cfg.tc) { xptext(2, 1, "XIANGQI 47", 1); return; }
+  if (!TC && !XG->n) { xptext(2, 1, "XIANGQI 47", 1); return; }   /* OFF: the title, then the time used */
   char a[16], b[16], s[24];
   fmt_clock(clock_left(XRED), a);
   fmt_clock(clock_left(XBLACK), b);
-  sprintf(s, " R %s ", a);
+  clock_label(s, 'R', a, XPANEL / 2 - 1);
   xptext(0, 1, s, XG->cur.side == XRED && !XG->over);
-  sprintf(s, " B %s ", b);
+  clock_label(s, 'B', b, XPANEL / 2 - 1);
   xptext(XPANEL / 2 + 2, 1, s, XG->cur.side == XBLACK && !XG->over);
   lcd_fill_rect(XPANEL / 2, 0, 1, h, 1);
 }
@@ -241,6 +243,12 @@ static void xq_draw_panel(void) {
         for (int x = 0; x < XQ_RSIZE; x++) if (row >> (15 - x) & 1) lcd_fill_rect(4 + k * 18 + x, y + 1 + yy, 1, 1, 1);
       }
     y += XQ_RSIZE + 3;
+  }
+  if (thinking && show_think && think_n) {              /* the CPU's thinking: the expected line (WXF), the counts */
+    char wd[12][10];
+    XPos p = XG->cur, q;
+    for (int i = 0; i < think_n; i++) { xq_move_to_wxf(&p, think_pv[i], wd[i]); xq_make_move(&p, &q, think_pv[i]); p = q; }
+    y = draw_think(y, XPANEL - 4, wd, think_n, xptext);
   }
   /* the moves, two a line (WXF), the last that fit */
   int bottom = cfg.level == 0 && cfg.mode != MODE_HH ? XBOT - 50 : XBOT - 2, lines = (bottom - y) / h;
@@ -288,11 +296,7 @@ static void xq_redraw(void) {
 static void xq_do_move(Move m) {
   if (XG->n >= MAXGAME) { strcpy(status, "Game too long"); return; }
   int mover = XG->cur.side;
-  if (clk_live) {
-    clk[mover] -= (int32_t)(now_ms() - turn_start);
-    if (clk[mover] <= 0) { clk[mover] = 0; XG->over = 6; clk_live = 0; beep(330, 400); return; }
-    clk[mover] += (int32_t)TCS[cfg.tc].inc_s * 1000;
-  }
+  if (clock_move(mover)) { XG->over = 6; return; }
   turn_start = now_ms();
   xq_move_to_wxf(&XG->cur, m, XG->wxf[XG->n]);
   XPos n;
@@ -332,10 +336,16 @@ static void xq_undo(void) {
 
 static void xq_info_cb(int depth, int score, uint32_t nodes, Move best) {
   char w[10];
-  (void)nodes;
   xq_move_to_wxf(&XG->cur, best, w);
   if (IS_MATE(score)) sprintf(status, "d%d %s M%d", depth, w, (MATE - (score < 0 ? -score : score) + 1) / 2);
   else sprintf(status, "d%d %s %+d", depth, w, score);
+  if (show_think) {                                     /* the line, the move on the board, the counts (as chess) */
+    think_nodes = nodes;
+    think_n = xq_search_pv(&XG->cur, best, think_pv, 12);
+    xhint_from = XFROM(best); xhint_to = XTO(best);
+    xq_redraw();
+    return;
+  }
   xq_draw_panel();
   lcd_show();
 }
@@ -345,11 +355,13 @@ static Result xq_run_search(int depth, uint32_t ms, int noise) {
   lim.depth = depth; lim.time_ms = ms; lim.noise = noise; lim.seed = rnd(); lim.max_nodes = 0;
   lim.now = now_ms; lim.poll = poll_cb; lim.info = xq_info_cb;
   thinking = 1;
+  think_n = 0; think_nodes = 0;
   last_draw = now_ms();
   strcpy(status, "Thinking...");
   xq_redraw();
-  uint32_t t0 = now_ms();
+  uint32_t t0 = think_t0 = now_ms();
   Result r = xq_search(&XG->cur, XG->keys, XG->n + 1, &lim);
+  think_n = 0;
   last_think_ms = now_ms() - t0;
   last_nps = last_think_ms ? (uint32_t)((uint64_t)r.nodes * 1000 / last_think_ms) : r.nodes;
   last_res = r;
@@ -494,8 +506,7 @@ static void xq_softkey(int k) {
   case 3:  xq_undo(); break;                                                       /* UNDO */
   case 4:  xq_hint(); break;                                                       /* HINT */
   case 6:  xq_style(); break;                                                      /* PIECES */
-  case 7:  cfg.tc = (int8_t)((cfg.tc + 1) % TC_CNT); clock_reset(); clock_update_live();   /* CLOCK */
-           sprintf(status, "Clock %s", TCS[cfg.tc].name); break;
+  case 7:  clock_key(); break;                                                     /* CLOCK */
   case 8:  cfg.human ^= 1; cfg.flip = cfg.human; if (cfg.mode != MODE_HH) cfg.mode = MODE_HC; xsel = -1;   /* SIDE */
            sprintf(status, "You play %s", cfg.human ? "Black" : "Red"); break;
   case 13: cfg.mode = (int8_t)(cfg.mode == MODE_HC ? MODE_HH : cfg.mode == MODE_HH ? MODE_CC : MODE_HC);  /* MODE */

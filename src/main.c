@@ -106,6 +106,12 @@ static char num_buf[5];
 static int  kirk;                  /* 960 # 1701: the Kobayashi Maru, Kirk rules (the C47 forum joke) */
 static char status[40];
 static int  thinking;
+/* the CPU's thinking (SHIFT F6 on / off): after each depth the expected line, its first move marked on the board (the
+   hint's dashed frames) and the counts (positions searched, a second, the time) */
+static int8_t   show_think = 1;
+static Move     think_pv[12];
+static int      think_n;
+static uint32_t think_nodes, think_t0;
 static uint32_t last_nps, last_think_ms;
 static Result   last_res;
 static uint32_t last_tick;
@@ -388,6 +394,36 @@ static int material(void) {
   return s;
 }
 
+static void fmt_count(uint32_t n, char *s) {          /* 950, 45k, 1.2M */
+  if (n < 10000) sprintf(s, "%lu", (unsigned long)n);
+  else if (n < 1000000) sprintf(s, "%luk", (unsigned long)(n / 1000));
+  else sprintf(s, "%lu.%luM", (unsigned long)(n / 1000000), (unsigned long)(n / 100000 % 10));
+}
+
+/* the thinking block in the panel (both games): the expected line's moves wrapped to w (two lines at most), then the
+   counts; a line under it. txt draws a text (ptext, xptext). Returns the y below it */
+static int draw_think(int y, int w, char (*wd)[10], int nw, void (*txt)(int, int, const char *, int)) {
+  int h = lh(t20), ln = 0;
+  char line[48] = "", t[48];
+  for (int i = 0; i < nw; i++) {
+    snprintf(t, sizeof t, "%s%s%s", line, line[0] ? " " : "", wd[i]);
+    if (line[0] && lcd_textWidth(t20, t) > w) {
+      txt(2, y, line, 0); y += h;
+      if (++ln == 2) { line[0] = 0; break; }
+      strcpy(line, wd[i]);
+    } else strcpy(line, t);
+  }
+  if (line[0]) { txt(2, y, line, 0); y += h; }
+  uint32_t ms = now_ms() - think_t0;
+  char a[12], b[12];
+  fmt_count(think_nodes, a);
+  fmt_count(ms ? (uint32_t)((uint64_t)think_nodes * 1000 / ms) : 0, b);
+  snprintf(t, sizeof t, "%s  %s/s  %lu.%lus", a, b, (unsigned long)(ms / 1000), (unsigned long)(ms / 100 % 10));
+  txt(2, y, t, 0); y += h + 2;
+  lcd_fill_rect(2, y, w, 1, 1);
+  return y + 3;
+}
+
 static void draw_panel(void) {
   char s[48];
   int h = lh(t20);
@@ -421,6 +457,14 @@ static void draw_panel(void) {
   y += h + 2;
   lcd_fill_rect(2, y, PANEL_W - 4, 1, 1);
   y += 3;
+
+  /* the CPU's thinking: the expected line (SAN) and the counts, above the moves */
+  if (thinking && show_think && think_n) {
+    char wd[12][10];
+    Pos p = *CUR, q;
+    for (int i = 0; i < think_n; i++) { move_to_san(&p, think_pv[i], wd[i]); make_move(&p, &q, think_pv[i]); p = q; }
+    y = draw_think(y, PANEL_W - 4, wd, think_n, ptext);
+  }
 
   /* move list: last lines that fit */
   int bottom = cfg.level == 0 && cfg.mode != MODE_HH ? BOARD_PX - 46 : BOARD_PX - h;
@@ -750,10 +794,17 @@ static void info_cb(int depth, int score, uint32_t nodes, Move best) {
   } else {
     sprintf(status, "d%d %s %+d.%02d", depth, san, score / 100, (score < 0 ? -score : score) % 100);
   }
-  (void)nodes;
 #ifdef SIM_DEBUG
   fprintf(stderr, "info d%d %d nodes %lu %s\n", depth, score, (unsigned long)nodes, san);
 #endif
+  if (show_think) {                            /* the line, the move on the board, the counts: the whole screen */
+    think_nodes = nodes;
+    think_n = search_pv(CUR, best, think_pv, 12);
+    hint_from = MFROM(best);
+    hint_to = (MFLAGS(best) & F_CASTLE) ? castle_rook_sq(CUR, best) : MTO(best);
+    redraw();
+    return;
+  }
   draw_panel();
   lcd_show();
 }
@@ -787,11 +838,13 @@ static Result run_search(int depth, uint32_t ms, int noise) {
   lim.poll = poll_cb;
   lim.info = info_cb;
   thinking = 1;
+  think_n = 0; think_nodes = 0;
   last_draw = now_ms();
   strcpy(status, "Thinking...");
   redraw();
-  uint32_t t0 = now_ms();
+  uint32_t t0 = think_t0 = now_ms();
   Result r = search(CUR, G->keys, G->n + 1, &lim);
+  think_n = 0;
   last_think_ms = now_ms() - t0;
   last_nps = last_think_ms ? (uint32_t)((uint64_t)r.nodes * 1000 / last_think_ms) : r.nodes;
   last_res = r;
@@ -918,8 +971,8 @@ static int read_file(const char *path, char *buf, int max) {
 static void serialize(char *o) {
   char fen[100];
   pos_to_fen(&G->hist[0], fen);
-  o += sprintf(o, "CHESS47 1\n%s\n%d %d %d %d %d %d %d\n", fen, G->pos960, cfg.level, cfg.mode,
-               cfg.human, cfg.flip, TC, chess960);   /* a stopped clock is saved as OFF (the time used) */
+  o += sprintf(o, "CHESS47 1\n%s\n%d %d %d %d %d %d %d %d\n", fen, G->pos960, cfg.level, cfg.mode,
+               cfg.human, cfg.flip, TC, chess960, show_think);   /* a stopped clock is saved as OFF (the time used) */
   o += sprintf(o, "%ld %ld\n", (long)clock_left(WHITE), (long)clock_left(BLACK));
   for (int i = 0; i < G->n; i++) {
     move_to_str(&G->hist[i], G->moves[i], o);
@@ -936,8 +989,9 @@ static int deserialize(char *s) {
   line[n++] = s;
   for (char *c = s; *c && n < 5; c++) if (*c == '\n') { *c = 0; line[n++] = c + 1; }
   if (n < 5 || strncmp(line[0], "CHESS47", 7)) return 0;
-  int pos960, lv, mode, human, flip, tc, c960 = 0;
-  if (sscanf(line[2], "%d %d %d %d %d %d %d", &pos960, &lv, &mode, &human, &flip, &tc, &c960) < 6) return 0;
+  int pos960, lv, mode, human, flip, tc, c960 = 0, think = show_think;
+  if (sscanf(line[2], "%d %d %d %d %d %d %d %d", &pos960, &lv, &mode, &human, &flip, &tc, &c960, &think) < 6) return 0;
+  show_think = (int8_t)(think ? 1 : 0);              /* the 8th number since v1.2 (older games: as it is) */
   long cw = 0, cb = 0;
   sscanf(line[3], "%ld %ld", &cw, &cb);
   chess960 = c960;
@@ -1189,7 +1243,7 @@ static void *heap_alloc(size_t n);
 /* SHIFT: the game menu, the same in both games: F1 the other game, F2 the pieces' style, F3 the zoom,
    F4 RESIGN, F5 DRAW (ACCEPT when the other side offered one); the soft keys show it while SHIFT is on */
 static void game_menu(void) {
-  const char *k[6] = { xq ? "CHESS" : "XIANGQI", "PIECES", zoom ? "NORMAL" : "ZOOM", "RESIGN", "DRAW", "" };
+  const char *k[6] = { xq ? "CHESS" : "XIANGQI", "PIECES", zoom ? "NORMAL" : "ZOOM", "RESIGN", "DRAW", "THINK" };
   if (!xq && VS_USB) k[3] = k[4] = "";                 /* vs USB: F4 / F5 of page 1 */
   else if (cfg.mode == MODE_HH && offer == (side_now() ^ 1) && !(xq ? XG->over : G->over)) k[4] = "ACCEPT";
   lcd_draw_menu_keys(k);
@@ -1436,9 +1490,12 @@ static void handle_key(int key) {
     case KEY_F5:                                                        /* DRAW / ACCEPT */
       if (xq) xq_draw_offer(); else if (!VS_USB) local_draw();
       return;
-    case KEY_F6: return;
+    case KEY_F6:                                                        /* THINK: the CPU's thinking on / off */
+      show_think ^= 1;
+      strcpy(status, show_think ? "Thinking shown" : "Thinking hidden");
+      return;
     case KEY_7:                                                         /* 七: the Seven Stars (Xiangqi) */
-      if (!xq) { if (!xq_enter()) return; xq = 1; offer = -1; clock_update_live(); }
+      if (!xq) { game_switch(); if (!xq) return; }                    /* chess's game and clock kept */
       xq_seven();
       return;
     case KEY_SIGMA: show_info(); return;

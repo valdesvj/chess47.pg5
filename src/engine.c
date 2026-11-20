@@ -33,6 +33,7 @@ static int16_t *hh;                   /* history [16*128] */
 static uint64_t *rep;                 /* repetition keys: game + search path */
 static int      rep_n;
 static Move    *scratch;              /* [MAXMOVES] for SAN etc. */
+static PVE     *pvh;                  /* [PVH_N] the main lines (search.inc) */
 
 static const int8_t NDIR[8] = { 33, 31, 18, 14, -33, -31, -18, -14 };
 static const int8_t KDIR[8] = { 1, -1, 16, -16, 17, 15, -17, -15 };
@@ -55,7 +56,8 @@ int eng_init(void *(*alloc)(size_t), size_t tt_bytes) {
   hh      = alloc(16 * 128 * sizeof(int16_t));
   rep     = alloc((MAXGAME + MAXPLY + 8) * sizeof(uint64_t));
   scratch = alloc(MAXMOVES * sizeof(Move));
-  if (!zp || !stk || !mbuf || !sbuf || !killer || !hh || !rep || !scratch) return 0;
+  pvh     = alloc(PVH_N * sizeof(PVE));
+  if (!zp || !stk || !mbuf || !sbuf || !killer || !hh || !rep || !scratch || !pvh) return 0;
 
   tt_n = 1;
   while ((size_t)tt_n * 2 * sizeof(TTE) <= tt_bytes) tt_n *= 2;
@@ -75,6 +77,7 @@ size_t eng_tt_bytes(void) { return (size_t)tt_n * sizeof(TTE); }
 
 void eng_clear_tt(void) {
   memset(tt, 0, tt_n * sizeof(TTE));
+  memset(pvh, 0, PVH_N * sizeof(PVE));
   memset(hh, 0, 16 * 128 * sizeof(int16_t));
   memset(killer, 0, MAXPLY * 2 * sizeof(Move));
 }
@@ -760,7 +763,7 @@ static inline void chess_null(const Pos *p, Pos *n) {
 
 const EngShared *eng_shared(void) {
   static EngShared sh;
-  sh.tt = tt; sh.tt_n = tt_n; sh.mbuf = mbuf; sh.sbuf = sbuf; sh.killer = killer; sh.rep = rep; sh.scratch = scratch;
+  sh.tt = tt; sh.tt_n = tt_n; sh.mbuf = mbuf; sh.sbuf = sbuf; sh.killer = killer; sh.rep = rep; sh.scratch = scratch; sh.pvh = pvh;
   return &sh;
 }
 
@@ -776,4 +779,5 @@ const EngShared *eng_shared(void) {
 #define G_QUIET(m)             (!(MFLAGS(m) & F_CAP) && !MPROMO(m))
 #define G_NOLEGAL(chk, ply)    ((chk) ? -MATE + (ply) : 0)
 
+#define PV_NAME search_pv
 #include "search.inc"

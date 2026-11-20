@@ -37,6 +37,11 @@ typedef struct {
   uint32_t nodes;
 } Result;
 
+/* the main lines' best moves, kept apart from the hash table (which overwrites them): the "thinking" display's expected
+   line. Written at the search's main-line (PV) nodes only; read by search_pv / xq_search_pv */
+typedef struct { uint64_t key; Move move; uint32_t pad; } PVE;
+#define PVH_N 512
+
 /* The tables the games share (one game plays at a time): the hash table, the move stacks, the killers, the
    repetition keys. src/xq_engine.c takes them from here instead of allocating its own. */
 typedef struct {
@@ -45,6 +50,7 @@ typedef struct {
   Move    (*killer)[2];
   uint64_t *rep;
   Move     *scratch;
+  PVE      *pvh;
 } EngShared;
 const EngShared *eng_shared(void);
 void eng_clear_tt(void);

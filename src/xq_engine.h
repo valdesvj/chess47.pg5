@@ -57,5 +57,6 @@ void xq_move_to_wxf(const XPos *p, Move m, char *s);           /* C2=5, H8+7, +R
 int  xq_game_state(const XPos *p, const uint64_t *keys, int nkeys);
 int  xq_evaluate(const XPos *p);
 Result xq_search(const XPos *root, const uint64_t *keys, int nkeys, const Limits *lim);
+int  xq_search_pv(const XPos *root, Move first, Move *pv, int max);   /* the expected line */
 
 #endif

@@ -74,7 +74,7 @@ draw. The famous line starts 炮二平四 卒5平6 兵四進一 將6進1 俥三�
 | **←** (backspace) | take back (two plies vs the CPU) |
 | **F1…F6** | soft keys (3 pages, `>>` switches page) |
 | **+** or **−** | zoom: the board the full screen height (30 px squares), the soft keys hidden (they still work); again: the normal view |
-| **SHIFT** | the game menu on the soft keys (also in the zoom): F1 XIANGQI / CHESS, F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW; **SHIFT 7** the Seven Stars (Xiangqi) |
+| **SHIFT** | the game menu on the soft keys (also in the zoom): F1 XIANGQI / CHESS, F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW, F6 THINK; **SHIFT 7** the Seven Stars (Xiangqi) |
 | **×** | the pieces: figures / letters (Xiangqi: characters / symbols / letters) |
 | **SHIFT EXIT** | power off. The game is autosaved and resumed at power on |
 | **SHIFT 0** | setup: time/date, beep, USB disk, **System**, About |
@@ -83,6 +83,7 @@ draw. The famous line starts 炮二平四 卒5平6 兵四進一 將6進1 俥三�
 | **SHIFT F5** DRAW | offer a draw. The CPU accepts when it is worse, or from move 20 when it is not better. With 2 players the other side sees **ACCEPT** on F5 on its turn (press twice); a move declines |
 | **NEW** in a game | against the CPU an unfinished game counts as resigned: NEW twice (the result shows), NEW again for the next game |
 | **SHIFT Σ+** | info screen |
+| **SHIFT F6** THINK | the CPU's thinking on / off (on at the start). While it thinks, after each depth: the status line `d14 e5 +0.18` (depth, best move, score); under it the **expected line** (its move, your reply, ... up to 12 moves, two lines), the **counts** (positions searched, positions a second, time: `2.6M  459k/s  5.8s`), and its **move marked on the board** (the HINT's frames). Off: the status line only. Also in Xiangqi (WXF) and the web version. The line is the search's main line, kept in its own small table: the search plays exactly as before (test/bench_chess.txt) |
 
 Castling: select the king, then press on the **rook**. In classic games you can
 also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Knight.

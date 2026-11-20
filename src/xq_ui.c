@@ -244,6 +244,12 @@ static void xq_draw_panel(void) {
       }
     y += XQ_RSIZE + 3;
   }
+  if (thinking && show_think && think_n) {              /* the CPU's thinking: the expected line (WXF), the counts */
+    char wd[12][10];
+    XPos p = XG->cur, q;
+    for (int i = 0; i < think_n; i++) { xq_move_to_wxf(&p, think_pv[i], wd[i]); xq_make_move(&p, &q, think_pv[i]); p = q; }
+    y = draw_think(y, XPANEL - 4, wd, think_n, xptext);
+  }
   /* the moves, two a line (WXF), the last that fit */
   int bottom = cfg.level == 0 && cfg.mode != MODE_HH ? XBOT - 50 : XBOT - 2, lines = (bottom - y) / h;
   int total = (XG->n + 1) / 2, first = total - lines;
@@ -330,10 +336,16 @@ static void xq_undo(void) {
 
 static void xq_info_cb(int depth, int score, uint32_t nodes, Move best) {
   char w[10];
-  (void)nodes;
   xq_move_to_wxf(&XG->cur, best, w);
   if (IS_MATE(score)) sprintf(status, "d%d %s M%d", depth, w, (MATE - (score < 0 ? -score : score) + 1) / 2);
   else sprintf(status, "d%d %s %+d", depth, w, score);
+  if (show_think) {                                     /* the line, the move on the board, the counts (as chess) */
+    think_nodes = nodes;
+    think_n = xq_search_pv(&XG->cur, best, think_pv, 12);
+    xhint_from = XFROM(best); xhint_to = XTO(best);
+    xq_redraw();
+    return;
+  }
   xq_draw_panel();
   lcd_show();
 }
@@ -343,11 +355,13 @@ static Result xq_run_search(int depth, uint32_t ms, int noise) {
   lim.depth = depth; lim.time_ms = ms; lim.noise = noise; lim.seed = rnd(); lim.max_nodes = 0;
   lim.now = now_ms; lim.poll = poll_cb; lim.info = xq_info_cb;
   thinking = 1;
+  think_n = 0; think_nodes = 0;
   last_draw = now_ms();
   strcpy(status, "Thinking...");
   xq_redraw();
-  uint32_t t0 = now_ms();
+  uint32_t t0 = think_t0 = now_ms();
   Result r = xq_search(&XG->cur, XG->keys, XG->n + 1, &lim);
+  think_n = 0;
   last_think_ms = now_ms() - t0;
   last_nps = last_think_ms ? (uint32_t)((uint64_t)r.nodes * 1000 / last_think_ms) : r.nodes;
   last_res = r;

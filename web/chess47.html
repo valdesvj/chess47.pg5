@@ -153,7 +153,7 @@ function eng_init(entries) {
   const z = next(); zsH = Number(z >> 32n) | 0; zsL = Number(z & 0xffffffffn) | 0;
   eng_clear_tt();
 }
-function eng_clear_tt() { ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); hh.fill(0); killer.fill(0); }
+function eng_clear_tt() { pvhH.fill(0); pvhL.fill(0); pvhM.fill(0); ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); hh.fill(0); killer.fill(0); }
 
 /* ---- position helpers ---- */
 function compute_key(p) {
@@ -797,6 +797,10 @@ function negamax(ply, depth, alpha, beta, can_null) {
   }
   if (!legal) return incheck ? -MATE + ply : 0;
 
+  if (pv && bm && best > orig && best < beta) {          /* a main-line node: its move kept for the display */
+    const q = p.lo & (PVH_N - 1);
+    pvhH[q] = p.hi; pvhL[q] = p.lo; pvhM[q] = bm;
+  }
   if (ttH[e] !== p.hi || ttL[e] !== p.lo || depth >= ttD[e] || best >= beta) {
     ttH[e] = p.hi; ttL[e] = p.lo; ttM[e] = bm;
     ttS[e] = score_to_tt(best, ply);
@@ -804,6 +808,26 @@ function negamax(ply, depth, alpha, beta, can_null) {
     ttF[e] = best >= beta ? TT_LOWER : best <= orig ? TT_UPPER : TT_EXACT;
   }
   return best;
+}
+
+/* the main lines' best moves, apart from the hash table (src/engine_common.h PVE): the "thinking" display's line */
+const PVH_N = 512;
+const pvhH = new Int32Array(PVH_N), pvhL = new Int32Array(PVH_N), pvhM = new Uint32Array(PVH_N);
+/* the expected line: first, then each position's main-line move (else the hash table's), legal, until a repeat
+   (src/search.inc search_pv): the tables are only read */
+function search_pv(root, first, max) {
+  const pv = [], seen = new Set();
+  let p = copyPos(newPos(), root), m = first;
+  while (m && pv.length < max && pv.length < 16) {
+    const n = newPos();
+    if (!make_move(p, n, m)) break;
+    const k = n.hi + ',' + n.lo;
+    if (seen.has(k)) break;
+    seen.add(k); pv.push(m); p = n;
+    const q = p.lo & (PVH_N - 1), e = p.lo & (tt_n - 1);
+    m = pvhH[q] === p.hi && pvhL[q] === p.lo ? pvhM[q] : ttH[e] === p.hi && ttL[e] === p.lo ? ttM[e] : 0;
+  }
+  return pv;
 }
 
 /* lim: { depth, time_ms, noise, seed, max_nodes, now(), poll(), info(depth, score, nodes, best) };
@@ -843,7 +867,7 @@ Object.assign(E, {
   WHITE, BLACK, BLK, NOSQ, INF, MATE, MV, MFROM, MTO, MPROMO, MFLAGS, PTYPE, PCOLOR, SQ, FILE_OF, RANK_OF, ONBOARD,
   IS_MATE, newPos, copyPos, ksq, eng_init, eng_clear_tt, pos_from_fen, pos_to_fen, pos_start, pos_960, attacked,
   in_check, insufficient, gen_moves, gen_legal, make_move, perft, castle_rook_sq, move_to_str, str_to_move,
-  move_to_san, game_state, evaluate, search, sqname,
+  move_to_san, game_state, evaluate, search, search_pv, sqname,
 });
 G.Chess47 = E;
 if (typeof module !== 'undefined') module.exports = E;
@@ -929,7 +953,7 @@ function xq_init(entries) {
   hh.fill(0);
 }
 /* as the C's eng_clear_tt(): the table and the killers; Xiangqi's history stays (xq_init clears it) */
-function xq_clear_tt() { ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); killer.fill(0); }
+function xq_clear_tt() { pvhH.fill(0); pvhL.fill(0); pvhM.fill(0); ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); killer.fill(0); }
 
 function compute_key(p) {
   let h = p.side ? zsH : 0, l = p.side ? zsL : 0;
@@ -1444,6 +1468,10 @@ function negamax(ply, depth, alpha, beta, can_null) {
   }
   if (!legal) return -MATE + ply;                       /* Xiangqi: no legal move loses, in check or not */
 
+  if (pv && bm && best > orig && best < beta) {          /* a main-line node: its move kept for the display */
+    const q = p.lo & (PVH_N - 1);
+    pvhH[q] = p.hi; pvhL[q] = p.lo; pvhM[q] = bm;
+  }
   if (ttH[e] !== p.hi || ttL[e] !== p.lo || depth >= ttD[e] || best >= beta) {
     ttH[e] = p.hi; ttL[e] = p.lo; ttM[e] = bm;
     ttS[e] = score_to_tt(best, ply);
@@ -1451,6 +1479,26 @@ function negamax(ply, depth, alpha, beta, can_null) {
     ttF[e] = best >= beta ? TT_LOWER : best <= orig ? TT_UPPER : TT_EXACT;
   }
   return best;
+}
+
+/* the main lines' best moves, apart from the hash table (src/engine_common.h PVE): the "thinking" display's line */
+const PVH_N = 512;
+const pvhH = new Int32Array(PVH_N), pvhL = new Int32Array(PVH_N), pvhM = new Uint32Array(PVH_N);
+/* the expected line: first, then each position's main-line move (else the hash table's), legal, until a repeat
+   (src/search.inc search_pv): the tables are only read */
+function xq_search_pv(root, first, max) {
+  const pv = [], seen = new Set();
+  let p = copyPos(newPos(), root), m = first;
+  while (m && pv.length < max && pv.length < 16) {
+    const n = newPos();
+    if (!xq_make_move(p, n, m)) break;
+    const k = n.hi + ',' + n.lo;
+    if (seen.has(k)) break;
+    seen.add(k); pv.push(m); p = n;
+    const q = p.lo & (PVH_N - 1), e = p.lo & (tt_n - 1);
+    m = pvhH[q] === p.hi && pvhL[q] === p.lo ? pvhM[q] : ttH[e] === p.hi && ttL[e] === p.lo ? ttM[e] : 0;
+  }
+  return pv;
 }
 
 /* lim: { depth, time_ms, noise, seed, max_nodes, now(), poll(), info(depth, score, nodes, best) };
@@ -1489,7 +1537,7 @@ Object.assign(X, {
   MAXMOVES, MAXGAME, INF, MATE, IS_MATE, XF_CAP, XMV, XFROM, XTO, XFLAGS, XEMPTY, XKING, XADVISOR, XELEPHANT, XHORSE,
   XCHARIOT, XCANNON, XPAWN, XRED, XBLACK, XOFF, XTYPE, XCOLOR, XSQ, XFILE, XRANK, newPos, copyPos, ksq, xq_init,
   xq_clear_tt, xq_from_fen, xq_to_fen, xq_pos_start, xq_attacked, xq_in_check, xq_gen_moves, xq_gen_legal,
-  xq_make_move, xq_perft, xq_move_to_str, xq_str_to_move, xq_move_to_wxf, xq_game_state, xq_evaluate, xq_search,
+  xq_make_move, xq_perft, xq_move_to_str, xq_str_to_move, xq_move_to_wxf, xq_game_state, xq_evaluate, xq_search, xq_search_pv,
 });
 G.Xiangqi47 = X;
 if (typeof module !== 'undefined') module.exports = X;
@@ -1575,12 +1623,14 @@ const store = {
   set(k, v) { try { localStorage.setItem('chess47.' + k, JSON.stringify(v)); } catch (e) { /* private window */ } },
 };
 const cfg = Object.assign({ level: 4, mode: MODE_HC, human: WHITE, flip: 0, tc: 0, sound: 1, page: 0, calc: 1,
-                            game: 'chess', pstyle: 0, xstyle: 0, zoom: 0 }, store.get('cfg') || {});
+                            game: 'chess', pstyle: 0, xstyle: 0, zoom: 0, think: 1 }, store.get('cfg') || {});
 let xq = cfg.game === 'xq' ? 1 : 0;                       /* the game on the screen: 0 chess, 1 Xiangqi */
 let shift = 0;                                            /* SHIFT: the game menu on the soft keys */
 const G = { hist: [E.newPos()], moves: [], san: [], keys: [], n: 0, over: 0, pos960: -1, legal: [], start: null, rfile: [7, 0], c960: 0 };
 let cur = 0x14, sel = NOSQ, hint_from = NOSQ, hint_to = NOSQ, last_from = NOSQ, last_to = NOSQ;
 let status = '', promo_mode = 0, promo_opts = [0, 0, 0, 0], thinking = 0, kirk = 0, info_screen = 0;
+/* the CPU's thinking (SHIFT F6, cfg.think): { pv: the expected line's moves written, nodes, t0 } while it thinks */
+let think = null;
 let resigner = -1, offer = -1, confirm = '', cpu_score = 0, cpu_scored = 0;   /* RESIGN, DRAW, the CPU's view */
 /* the clock (src/main.c): clk the time left, or the time used when OFF (or stopped during the game: clk_off);
    keep: each game's clock while the other is played ({ tc, off, t }: [0] chess, [1] Xiangqi) */
@@ -1804,7 +1854,11 @@ function worker_main() {                                  /* runs inside the wor
       const t0 = performance.now();
       const r = X.xq_search(q, keys, {
         depth: d.depth, time_ms: d.ms, noise: d.noise, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
-        info: (depth, score, nodes, best) => self.postMessage({ type: 'info', depth, score, nodes, best, san: X.xq_move_to_wxf(q, best) }),
+        info: (depth, score, nodes, best) => {
+          const pv = []; let a = q;
+          for (const m of X.xq_search_pv(q, best, 12)) { pv.push(X.xq_move_to_wxf(a, m)); const n = X.newPos(); X.xq_make_move(a, n, m); a = n; }
+          self.postMessage({ type: 'info', depth, score, nodes, best, san: X.xq_move_to_wxf(q, best), pv });
+        },
       });
       self.postMessage({ type: 'done', best: r.best, score: r.score, depth: r.depth, nodes: r.nodes, ms: performance.now() - t0 });
       return;
@@ -1820,7 +1874,11 @@ function worker_main() {                                  /* runs inside the wor
     const t0 = performance.now();
     const r = E.search(q, keys, {
       depth: d.depth, time_ms: d.ms, noise: d.noise, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
-      info: (depth, score, nodes, best) => self.postMessage({ type: 'info', depth, score, nodes, best, san: E.move_to_san(q, best) }),
+      info: (depth, score, nodes, best) => {
+        const pv = []; let a = q;
+        for (const m of E.search_pv(q, best, 12)) { pv.push(E.move_to_san(a, m)); const n = E.newPos(); E.make_move(a, n, m); a = n; }
+        self.postMessage({ type: 'info', depth, score, nodes, best, san: E.move_to_san(q, best), pv });
+      },
     });
     self.postMessage({ type: 'done', best: r.best, score: r.score, depth: r.depth, nodes: r.nodes, ms: performance.now() - t0 });
   };
@@ -1836,6 +1894,32 @@ function run_search(depth, ms, noise, oninfo) {
                   depth, ms: cfg.calc && ms ? 0 : ms, noise, seed: (Math.random() * 4294967296) >>> 0,
                   max_nodes: cfg.calc && ms ? max_nodes : 0 });
   });
+}
+/* a depth done: the line, the counts, its first move marked (the hint's marks), when the thinking is shown */
+function think_info(d) {
+  if (!cfg.think || !think) return;
+  think.pv = d.pv || []; think.nodes = d.nodes;
+  if (xq) { xhint_from = X.XFROM(d.best); xhint_to = X.XTO(d.best); }
+  else { hint_from = MFROM(d.best); hint_to = MFLAGS(d.best) & F_CASTLE ? E.castle_rook_sq(CUR(), d.best) : MTO(d.best); }
+}
+const fmt_count = n => n < 10000 ? String(n) : n < 1e6 ? Math.floor(n / 1000) + 'k' : (Math.floor(n / 1e5) / 10).toFixed(1) + 'M';
+/* the thinking block in the panel: the line wrapped to w (two lines at most), the counts, a line under it; the y below */
+function draw_think(y, w) {
+  if (!(thinking && cfg.think && think && think.pv.length)) return y;
+  ctx.font = FONT;
+  const fits = t => ctx.measureText(t).width / S <= w;
+  let line = '', ln = 0;
+  for (const m of think.pv) {
+    const t = line ? line + ' ' + m : m;
+    if (line && !fits(t)) { ptext(2, y, line, 0); y += LH; if (++ln === 2) { line = ''; break; } line = m; }
+    else line = t;
+  }
+  if (line) { ptext(2, y, line, 0); y += LH; }
+  const ms = now() - think.t0;
+  ptext(2, y, `${fmt_count(think.nodes)}  ${fmt_count(ms ? Math.floor(think.nodes * 1000 / ms) : 0)}/s  ${(Math.floor(ms / 100) / 10).toFixed(1)}s`, 0);
+  y += LH + 2;
+  fill(2, y, w, 1, 1);
+  return y + 3;
 }
 function move_now_discard() {                             /* stop thinking, no move (resign, new game) */
   if (!wjob) return;
@@ -1887,14 +1971,15 @@ async function cpu_move() {
     await sleep(250);
     m = G.legal[Math.floor(Math.random() * G.legal.length)];
   } else {
-    thinking = 1; status = 'Thinking...'; redraw();
+    thinking = 1; status = 'Thinking...'; think = { pv: [], nodes: 0, t0: now() }; redraw();
     const n0 = G.n;
     const r = await run_search(L.depth, think_time(L.ms), L.noise, d => {
+      think_info(d);
       status = E.IS_MATE(d.score) ? `d${d.depth} ${d.san} M${d.score < 0 ? '-' : ''}${Math.floor((E.MATE - Math.abs(d.score) + 1) / 2)}`
                                   : `d${d.depth} ${d.san} ${d.score >= 0 ? '+' : '-'}${Math.floor(Math.abs(d.score) / 100)}.${String(Math.abs(d.score) % 100).padStart(2, '0')}`;
       redraw();
     });
-    thinking = 0;
+    thinking = 0; think = null;
     if (r.discard || G.n !== n0 || G.over) return;        /* stopped (resign, draw, new game) */
     last = { depth: r.depth, nodes: r.nodes, ms: r.ms, score: r.score };
     m = r.best || G.legal[0];
@@ -2271,10 +2356,10 @@ async function xq_cpu_move() {
   }
   if (cfg.level === 0) { await sleep(250); m = XG.legal[Math.floor(Math.random() * XG.legal.length)]; }
   else {
-    thinking = 1; status = 'Thinking...'; redraw();
+    thinking = 1; status = 'Thinking...'; think = { pv: [], nodes: 0, t0: now() }; redraw();
     const n0 = XG.n;
-    const r = await run_search(L.depth, think_time(L.ms), L.noise, d => { status = score_text(d); redraw(); });
-    thinking = 0;
+    const r = await run_search(L.depth, think_time(L.ms), L.noise, d => { think_info(d); status = score_text(d); redraw(); });
+    thinking = 0; think = null;
     if (r.discard || XG.n !== n0 || XG.over || !xq) return;
     last = { depth: r.depth, nodes: r.nodes, ms: r.ms, score: r.score };
     m = r.best || XG.legal[0];
@@ -2419,6 +2504,7 @@ function game_menu(fn) {
   case 2: zoom_toggle(); break;
   case 3: if (xq) xq_resign(0); else resign(0); break;
   case 4: if (xq) xq_draw_offer(); else draw(); break;
+  case 5: cfg.think ^= 1; status = cfg.think ? 'Thinking shown' : 'Thinking hidden'; store.set('cfg', cfg); break;
   }
 }
 
@@ -2503,6 +2589,7 @@ function xq_draw_panel() {
       if (XB.seven[k][yy] >> (15 - x) & 1) fill(4 + k * 18 + x, y + 1 + yy, 1, 1, 1);
     y += 18;
   }
+  y = draw_think(y, XPANEL - 4);                          /* the CPU's thinking, above the moves */
   const crazy = cfg.level === 0 && cfg.mode !== MODE_HH, pbot = cfg.zoom ? LCD_Y : MENU_Y;
   const bottom = crazy ? pbot - 50 : pbot - 2, lines = Math.max(1, Math.floor((bottom - y) / h));
   const total = (XG.n + 1) >> 1, first = Math.max(0, total - lines);
@@ -2626,6 +2713,7 @@ function draw_panel() {
   y += h + 2;
   fill(2, y, PANEL_W - 4, 1, 1);
   y += 3;
+  y = draw_think(y, PANEL_W - 4);                         /* the CPU's thinking, above the moves */
   const crazy = cfg.level === 0 && cfg.mode !== MODE_HH;
   const bottom = crazy ? BOARD_PX - 46 : BOARD_PX - h;
   const lines = Math.max(1, Math.floor((bottom - y) / h));
@@ -2651,7 +2739,7 @@ const menu_boxes = [];
 /* SHIFT: the game menu, the same in both games: the other game, the pieces' style, the zoom, RESIGN, DRAW */
 function game_menu_keys() {
   const acc = cfg.mode === MODE_HH && offer === (side_now() ^ 1) && !over_now();
-  return [xq ? 'CHESS' : 'XIANGQI', 'PIECES', cfg.zoom ? 'NORMAL' : 'ZOOM', 'RESIGN', acc ? 'ACCEPT' : 'DRAW', ''];
+  return [xq ? 'CHESS' : 'XIANGQI', 'PIECES', cfg.zoom ? 'NORMAL' : 'ZOOM', 'RESIGN', acc ? 'ACCEPT' : 'DRAW', 'THINK'];
 }
 function draw_menu() {
   menu_boxes.length = 0;

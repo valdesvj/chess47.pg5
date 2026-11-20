@@ -34,6 +34,7 @@ static int16_t *hh;                        /* history [16 * 256] */
 static uint64_t *rep;
 static int      rep_n;
 static Move    *scratch;
+static PVE     *pvh;
 static uint32_t nodes;
 static uint64_t *zp, zside;                /* zp [14 * 90] */
 
@@ -56,7 +57,7 @@ static uint64_t rnd64(void) { uint64_t x = rs; x ^= x << 13; x ^= x >> 7; x ^= x
 int xq_init(void *(*alloc)(size_t)) {
   const EngShared *sh = eng_shared();
   tt = (TTE *)sh->tt; tt_n = sh->tt_n;
-  mbuf = sh->mbuf; sbuf = sh->sbuf; killer = sh->killer; rep = sh->rep; scratch = sh->scratch;
+  mbuf = sh->mbuf; sbuf = sh->sbuf; killer = sh->killer; rep = sh->rep; scratch = sh->scratch; pvh = sh->pvh;
   if (!tt || !mbuf) return 0;
   if (!zp) {
     zp = alloc(14 * 90 * sizeof(uint64_t));
@@ -502,4 +503,5 @@ static inline void xq_null(const Pos *p, Pos *n) { *n = *p; n->side ^= 1; n->key
 #define G_QUIET(m)             (!(XFLAGS(m) & XF_CAP))
 #define G_NOLEGAL(chk, ply)    (-MATE + (ply))
 
+#define PV_NAME xq_search_pv
 #include "search.inc"

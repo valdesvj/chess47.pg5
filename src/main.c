@@ -81,15 +81,19 @@ static const Level LEVELS[10] = {
 
 typedef struct { const char *name; uint32_t base_s, inc_s; } TimeCtl;
 static const TimeCtl TCS[] = {
-  { "OFF", 0, 0 }, { "1+0", 60, 0 }, { "3+2", 180, 2 }, { "5+0", 300, 0 },
-  { "10+0", 600, 0 }, { "15+10", 900, 10 }, { "30+0", 1800, 0 }, { "60+0", 3600, 0 },
+  /* tournament controls: 3+2 FIDE World Blitz, 15+10 FIDE World Rapid, 90+30 classical; 1+0 bullet (online) */
+  { "OFF", 0, 0 }, { "1+0", 60, 0 }, { "3+2", 180, 2 }, { "5+3", 300, 3 },
+  { "10+5", 600, 5 }, { "15+10", 900, 10 }, { "25+10", 1500, 10 }, { "90+30", 5400, 30 },
 };
 #define TC_CNT ((int)(sizeof TCS / sizeof *TCS))
 
-/* clock */
+/* clock: with a time control clk[] is each side's time left (counting down); OFF (or stopped during the game: CLOCK
+   twice) clk[] is each side's time used (counting up, nobody loses on time) */
 static int32_t  clk[2];
 static uint32_t turn_start;
 static int      clk_live;   /* clock currently ticking */
+static int8_t   clk_off;    /* this game's clock stopped during the game (until NEW) */
+#define TC (clk_off ? 0 : cfg.tc)   /* this game's time control (0: the time used counts up) */
 
 /* UI */
 static int  cur = 0x14, sel = NOSQ;
@@ -146,9 +150,9 @@ static int usb_side(int side) { return VS_USB && side != cfg.human; }
 
 static void fmt_clock(int32_t ms, char *s) {
   if (ms < 0) ms = 0;
-  int t = (ms + 999) / 1000;
+  int t = TC ? (ms + 999) / 1000 : ms / 1000;   /* the time left rounded up, the time used (OFF) down */
   if (t >= 3600) sprintf(s, "%d:%02d:%02d", t / 3600, (t / 60) % 60, t % 60);
-  else if (ms < 10000) sprintf(s, "%d.%d", (int)(ms / 1000), (int)((ms / 100) % 10));
+  else if (ms < 10000 && TC) sprintf(s, "%d.%d", (int)(ms / 1000), (int)((ms / 100) % 10));
   else sprintf(s, "%d:%02d", t / 60, t % 60);
 }
 
@@ -156,13 +160,17 @@ static void fmt_clock(int32_t ms, char *s) {
 static int xq;
 static int xq_side(void);
 static int xq_over_n(int *n);
+static int xq_first_side(void);
 static void xq_draw_clock(void);
 static void xq_redraw(void);
 static int side_now(void) { return xq ? xq_side() : CUR->side; }
 
 static int32_t clock_left(int side) {
-  int32_t c = clk[side];
-  if (clk_live && side_now() == side) c -= (int32_t)(now_ms() - turn_start);
+  int32_t c = clk[side];                  /* the time left, or the time used when the clock is OFF */
+  if (clk_live && side_now() == side) {
+    int32_t e = (int32_t)(now_ms() - turn_start);
+    c += TC ? -e : e;
+  }
   return c;
 }
 
@@ -316,10 +324,17 @@ static void ptext(int x, int y, const char *s, int inv) {
   text_at(t20, x, y, b, inv);
 }
 
+/* " W 12:34 ", or tighter when it does not fit half the panel (an hour or more: 1:30:00) */
+static void clock_label(char *s, char side, const char *t, int w) {
+  sprintf(s, " %c %s ", side, t);
+  if (lcd_textWidth(t20, s) > w) sprintf(s, "%c %s", side, t);
+  if (lcd_textWidth(t20, s) > w) sprintf(s, "%c%s", side, t);
+}
+
 static void draw_clock(void) {
   int h = lh(t20) + 2;
   lcd_fill_rect(0, 0, PANEL_W + 4, h, 0);
-  if (!cfg.tc) {
+  if (!TC && !G->n) {                     /* OFF: the title until the first move, then the time used */
     ptext(2, 1, "CHESS 47", 1);
     char s[16];
     sprintf(s, "%s", chess960 ? (G->pos960 >= 0 ? "960" : "FEN") : "");
@@ -332,9 +347,9 @@ static void draw_clock(void) {
   fmt_clock(clock_left(BLACK), b);
   int stm = CUR->side;
   char s[24];
-  sprintf(s, " W %s ", a);
+  clock_label(s, 'W', a, PANEL_W / 2 - 1);
   ptext(0, 1, s, stm == WHITE && !G->over);
-  sprintf(s, " B %s ", b);
+  clock_label(s, 'B', b, PANEL_W / 2 - 1);
   ptext(PANEL_W / 2 + 2, 1, s, stm == BLACK && !G->over);
   lcd_fill_rect(PANEL_W / 2, 0, 1, h, 1);
 }
@@ -539,15 +554,58 @@ static int usb_decline(void) {
 }
 
 static void clock_reset(void) {
-  clk[0] = clk[1] = (int32_t)TCS[cfg.tc].base_s * 1000;
+  clk[0] = clk[1] = (int32_t)TCS[TC].base_s * 1000;     /* OFF: 0 used */
   clk_live = 0;
 }
 
 static void clock_update_live(void) {
   int n = G->n, over = xq ? xq_over_n(&n) : G->over;
-  int want = cfg.tc && !over && n > 0;
+  int want = !over && n > 0;                            /* OFF too: the time used counts up */
   if (want && !clk_live) turn_start = now_ms();
   clk_live = want;
+}
+
+/* a move played by mover (chess or Xiangqi): its time off (or added to its time used when OFF), then the increment;
+   1 when its time ran out (the caller ends the game: lost on time) */
+static int clock_move(int mover) {
+  if (!clk_live) return 0;
+  int32_t e = (int32_t)(now_ms() - turn_start);
+  if (!TC) { clk[mover] += e; return 0; }
+  clk[mover] -= e;
+  if (clk[mover] <= 0) { clk[mover] = 0; clk_live = 0; beep(330, 400); return 1; }
+  clk[mover] += (int32_t)TCS[TC].inc_s * 1000;
+  return 0;
+}
+
+/* CLOCK (soft key, page 2, both games): before the first move it cycles the time controls; during the game only
+   OFF, with a second press (each side's time left becomes its time used: the start + the increments - the time
+   left), so a clock is never refilled during a game; otherwise (the game over, a stopped clock, vs USB) the
+   control is chosen at NEW */
+static void clock_key(void) {
+  int n = G->n, over = xq ? xq_over_n(&n) : G->over;
+  if (!n && !over) {
+    cfg.tc = (int8_t)((cfg.tc + 1) % TC_CNT);
+    clk_off = 0;
+    clock_reset(); clock_update_live();
+    sprintf(status, "Clock %s", TCS[cfg.tc].name);
+    return;
+  }
+  if (TC && !over && !VS_USB) {
+    if (confirm != 'C') { confirm = 'C'; strcpy(status, "Stop clock? CLOCK"); return; }
+    confirm = 0;
+    int first = xq ? xq_first_side() : G->hist[0].side;
+    for (int s = 0; s < 2; s++) {
+      /* the increments s got: one a move, but none for the game's first move (the clock starts after it) */
+      int moves = s == first ? (n + 1) / 2 - 1 : n / 2;
+      int32_t used = ((int32_t)TCS[TC].base_s + (int32_t)TCS[TC].inc_s * moves) * 1000 - clock_left(s);
+      clk[s] = used < 0 ? 0 : used;
+    }
+    clk_off = 1;
+    turn_start = now_ms();
+    strcpy(status, "Clock off: time used");
+    return;
+  }
+  strcpy(status, "Clock: set at NEW");
 }
 
 static void new_game_from(const Pos *start, int pos960) {
@@ -565,6 +623,7 @@ static void new_game_from(const Pos *start, int pos960) {
   cur = cfg.flip ? 0x64 : 0x14;
   status[0] = 0;
   promo_mode = 0;
+  clk_off = 0;
   clock_reset();
   eng_clear_tt();
   refresh_legal();
@@ -603,11 +662,7 @@ static void do_move(Move m) {
   Pos *p = CUR;
   int mover = p->side;
   /* clock */
-  if (clk_live) {
-    clk[mover] -= (int32_t)(now_ms() - turn_start);
-    if (clk[mover] <= 0) { clk[mover] = 0; G->over = 6; clk_live = 0; beep(330, 400); return; }
-    clk[mover] += (int32_t)TCS[cfg.tc].inc_s * 1000;
-  }
+  if (clock_move(mover)) { G->over = 6; return; }
   turn_start = now_ms();
   move_to_san(p, m, G->san[G->n]);
   if (offer >= 0 && mover != offer) offer = -1;   /* 2 players: moving declines the other side's offer */
@@ -676,7 +731,7 @@ static int poll_cb(void) {
   }
   usbser_task();                                            /* the USB keeps answering the PC during the search */
   uint32_t t = now_ms();
-  if (clk_live && clock_left(side_now()) <= 0) stop = 1;
+  if (clk_live && TC && clock_left(side_now()) <= 0) stop = 1;
   if (t - last_draw > 500) {
     last_draw = t;
     if (xq) xq_draw_clock(); else draw_clock();
@@ -712,9 +767,9 @@ static uint32_t think_time(uint32_t level_ms) {
     if (level_ms && (uint32_t)t > level_ms) t = (int32_t)level_ms;
     return (uint32_t)t;
   }
-  if (!cfg.tc) return level_ms;
+  if (!TC) return level_ms;
   int32_t left = clock_left(side_now());
-  int32_t t = left / 25 + (int32_t)TCS[cfg.tc].inc_s * 750;
+  int32_t t = left / 25 + (int32_t)TCS[TC].inc_s * 750;
   if (t > left / 3) t = left / 3;
   if (t < 50) t = 50;
   if (level_ms && (uint32_t)t > level_ms) t = (int32_t)level_ms;
@@ -811,7 +866,7 @@ static void cpu_move(void) {
   } else {
     uint32_t ms = think_time(L->ms);
     int depth = L->depth;
-    if (cfg.tc && !L->ms) depth = L->depth;     /* fixed-depth levels stay weak */
+    if (TC && !L->ms) depth = L->depth;     /* fixed-depth levels stay weak */
     Result r = run_search(depth, ms, L->noise);
     m = r.best ? r.best : G->legal[0];
     cpu_score = r.score; cpu_scored = 1;
@@ -864,7 +919,7 @@ static void serialize(char *o) {
   char fen[100];
   pos_to_fen(&G->hist[0], fen);
   o += sprintf(o, "CHESS47 1\n%s\n%d %d %d %d %d %d %d\n", fen, G->pos960, cfg.level, cfg.mode,
-               cfg.human, cfg.flip, cfg.tc, chess960);
+               cfg.human, cfg.flip, TC, chess960);   /* a stopped clock is saved as OFF (the time used) */
   o += sprintf(o, "%ld %ld\n", (long)clock_left(WHITE), (long)clock_left(BLACK));
   for (int i = 0; i < G->n; i++) {
     move_to_str(&G->hist[i], G->moves[i], o);
@@ -909,7 +964,7 @@ static int deserialize(char *s) {
     do_move(m);
     clk_live = saved;
   }
-  if (cfg.tc) { clk[WHITE] = (int32_t)cw; clk[BLACK] = (int32_t)cb; }
+  clk[WHITE] = (int32_t)cw; clk[BLACK] = (int32_t)cb;   /* the time left, or used (OFF) */
   turn_start = now_ms();
   clock_update_live();
   return 1;
@@ -1144,6 +1199,7 @@ static void game_switch(void) {                         /* chess <-> Xiangqi, ea
   if (xq) { xq = 0; eng_clear_tt(); strcpy(status, "Chess"); refresh_legal(); }
   else if (xq_enter()) { xq = 1; strcpy(status, "Xiangqi"); }
   offer = -1;
+  clk_off = 0;
   clock_reset(); clock_update_live();
 }
 
@@ -1283,8 +1339,7 @@ static void handle_softkey(int k) {
            else hint(); break;
   case 6: if (chess960) { new_game(-1); strcpy(status, "Normal chess");} 
           else {  start_960_entry(); } break; /* 960 / normal-chess toggle */                                               /* 960 */
-  case 7:  cfg.tc = (int8_t)((cfg.tc + 1) % TC_CNT); clock_reset(); clock_update_live(); /* CLOCK */
-           sprintf(status, "Clock %s", TCS[cfg.tc].name); break;
+  case 7:  clock_key(); break;                                                       /* CLOCK */
   case 8:  cfg.human ^= 1; cfg.flip = cfg.human; if (!VS_USB) cfg.mode = MODE_HC; sel = NOSQ;    /* SIDE */
            usb_opponent();
            sprintf(status, cfg.mode == MODE_EUSB ? "CPU plays %s" : "You play %s", cfg.human ? "Black" : "White"); break;
@@ -1321,7 +1376,7 @@ static void handle_softkey(int k) {
 static void handle_key(int key) {
   if (key == KEY_SHIFT) { shift = !shift; return; }
   if (!((key == KEY_F4 && confirm == 'R') || (key == KEY_F5 && confirm == 'A') ||
-         (cfg.page == 0 && key == KEY_F1 && confirm == 'N')))
+         (cfg.page == 0 && key == KEY_F1 && confirm == 'N') || (cfg.page == 1 && key == KEY_F2 && confirm == 'C')))
     confirm = 0;                                   /* any other key: no resign / accept pending */
 
   if (num_mode) {

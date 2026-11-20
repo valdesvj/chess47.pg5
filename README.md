@@ -99,8 +99,17 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
   depth plus randomness) and 4–9 (0.5 s → 30 s per move). Levels 4+ use a small opening book.
 * **960**: type a Chess960 position number 0–959 and press ENTER. ENTER alone picks a random one.
   NEW then deals another random 960 position.
-* **CLOCK**: OFF, 1+0, 3+2, 5+0, 10+0, 15+10, 30+0, 60+0, shown at the top left.
-  The clock pauses while the calculator is off. The CPU manages its own time.
+* **CLOCK**: OFF, 1+0, 3+2, 5+3, 10+5, 15+10, 25+10, 90+30 (minutes + seconds a move), shown at the top left;
+  the tournament controls: 3+2 is FIDE's World Blitz, 15+10 FIDE's World Rapid, 90+30 classical (1+0 is bullet).
+  The clock starts after the first move (it is free). The clock pauses while the calculator is off. The CPU
+  manages its own time, and its clock runs while it thinks. The same clock in Xiangqi.
+  * Before the first move CLOCK cycles the controls. During a game it only stops the clock, with a second
+    press ("Stop clock? CLOCK"; any other key cancels): a clock is never refilled during a game. After that, or
+    when the game is over, the control is chosen at NEW.
+  * OFF: the title until the first move, then each side's **time used**, counting up (nobody loses on time);
+    a clock stopped during the game shows the time each side has used so far. SAVE / LOAD keep it.
+  * Games saved by v1.1 load with the control at the same place in the list (5+0 becomes 5+3, 10+0 10+5,
+    30+0 25+10, 60+0 90+30) and their clocks' time left as it was.
 * **MODE**: You vs CPU / 2 players / CPU vs CPU demo / You vs USB / CPU vs USB (below). **SIDE** swaps colours.
 * **SAVE/LOAD**: `/CHESS47/GAME.TXT`. **PGN** writes `/CHESS47/GAME.PGN`
   (with `[Variant "Chess960"]` and `[FEN]` tags when needed).

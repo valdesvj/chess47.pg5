@@ -2,14 +2,30 @@
 
 **CHESS47.pg5** is a stand-alone DMCP5 program written in C for the
 SwissMicros **DM42n**. It replaces the calculator program (Free42) with a full
-chess machine that has graphic pieces, a chess clock, Chess960, 10 levels
-(including **CRAZY**), save/load, PGN export, an on-screen **QR code** of the game,
-and USB serial output.
+chess machine that has graphic pieces, a **tournament chess clock** (FIDE blitz 3+2, rapid 15+10, classical 90+30,
+and more), a **thinking display** (the CPU's expected line, its search counts and its move on the board), Chess960,
+10 levels (including **CRAZY**), save/load, PGN export, an on-screen **QR code** of the game, and USB serial output
+(play Stockfish or Lichess with the calculator as your board). **Xiangqi** (Chinese chess) is built in, with the
+same engine, and the whole program also runs in a browser (`web/chess47.html`).
 
 Part of the "47" family of projects (almanac47, chess47, logic47, tide47 …).
 This is the native C sister of the RPN `chess47` program for the C47.
 
 ![Chess 47 screens](docs/screens.png)
+
+*A 15+10 game against level 4; level 9 thinking (its expected line, the counts, its move marked); Chess960 with the
+clock OFF (each side's time used); the CRAZY level.*
+
+### New in v1.2
+
+(v1.2.1: the thinking display's expected line always complete; this manual and the screenshots updated.)
+
+* **Tournament clock**: OFF, 1+0, 3+2, 5+3, 10+5, 15+10, 25+10, 90+30. A clock can't be refilled during a game: there
+  CLOCK only stops it (pressed twice); OFF counts each side's time used. Chess and Xiangqi each keep their own
+  clock (SHIFT F1). See [The clock](#the-clock).
+* **Thinking display** (SHIFT F6): while the CPU thinks, its expected line, positions searched and speed, and its
+  move marked on the board. See [The thinking display](#the-thinking-display). The search plays exactly as in v1.1.
+* The same in Xiangqi and in the web version, which now also keeps both games' clocks when the page is closed.
 
 ## Install on the DM42n
 
@@ -28,7 +44,8 @@ To return to Free42: in Chess 47 press **SHIFT 0 (SETUP) → System**, or use
 ## Xiangqi (Chinese chess), experimental
 
 **SHIFT** opens the game menu, the same in both games: **F1 XIANGQI / CHESS** switches games (each keeps its
-own), **F2 PIECES** the pieces' style, **F3 ZOOM**, **F4 RESIGN**, **F5 DRAW**. Xiangqi has the same search as chess
+own, with its clock), **F2 PIECES** the pieces' style, **F3 ZOOM**, **F4 RESIGN**, **F5 DRAW**, **F6 THINK** the thinking
+display. Xiangqi has the same search as chess
 (the shared `src/search.inc`), the same levels, clock and modes (you vs CPU, 2 players, CPU vs CPU), soft keys and
 zoom; moves in WXF notation (C2=5, H8+7). The pieces (**×** or SHIFT F2): the traditional characters (Red
 帥仕相傌俥炮兵, Black 將士象馬車砲卒, from Noto Sans CJK, thinned to one-pixel strokes), symbols (crown, shield,
@@ -83,7 +100,7 @@ draw. The famous line starts 炮二平四 卒5平6 兵四進一 將6進1 俥三�
 | **SHIFT F5** DRAW | offer a draw. The CPU accepts when it is worse, or from move 20 when it is not better. With 2 players the other side sees **ACCEPT** on F5 on its turn (press twice); a move declines |
 | **NEW** in a game | against the CPU an unfinished game counts as resigned: NEW twice (the result shows), NEW again for the next game |
 | **SHIFT Σ+** | info screen |
-| **SHIFT F6** THINK | the CPU's thinking on / off (on at the start). While it thinks, after each depth: the status line `d14 e5 +0.18` (depth, best move, score); under it the **expected line** (its move, your reply, ... up to 12 moves, two lines), the **counts** (positions searched, positions a second, time: `2.6M  459k/s  5.8s`), and its **move marked on the board** (the HINT's frames). Off: the status line only. Also in Xiangqi (WXF) and the web version. The line is the search's main line, kept in its own small table: the search plays exactly as before (test/bench_chess.txt) |
+| **SHIFT F6** THINK | the CPU's thinking shown / hidden ([below](#the-thinking-display)) |
 
 Castling: select the king, then press on the **rook**. In classic games you can
 also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Knight.
@@ -100,20 +117,7 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
   depth plus randomness) and 4–9 (0.5 s → 30 s per move). Levels 4+ use a small opening book.
 * **960**: type a Chess960 position number 0–959 and press ENTER. ENTER alone picks a random one.
   NEW then deals another random 960 position.
-* **CLOCK**: OFF, 1+0, 3+2, 5+3, 10+5, 15+10, 25+10, 90+30 (minutes + seconds a move), shown at the top left;
-  the tournament controls: 3+2 is FIDE's World Blitz, 15+10 FIDE's World Rapid, 90+30 classical (1+0 is bullet).
-  The clock starts after the first move (it is free). The clock pauses while the calculator is off. The CPU
-  manages its own time, and its clock runs while it thinks. The same clock in Xiangqi.
-  * Before the first move CLOCK cycles the controls. During a game it only stops the clock, with a second
-    press ("Stop clock? CLOCK"; any other key cancels): a clock is never refilled during a game. After that, or
-    when the game is over, the control is chosen at NEW.
-  * OFF: the title until the first move, then each side's **time used**, counting up (nobody loses on time);
-    a clock stopped during the game shows the time each side has used so far. SAVE / LOAD keep it.
-  * Chess and Xiangqi each keep their own clock (control, times, stopped or not): SHIFT F1 puts one game and its
-    clock aside, the clock waiting, and brings the other back as it was. The web version does the same and keeps
-    both clocks when the page is closed.
-  * Games saved by v1.1 load with the control at the same place in the list (5+0 becomes 5+3, 10+0 10+5,
-    30+0 25+10, 60+0 90+30) and their clocks' time left as it was.
+* **CLOCK**: the time control, before the first move; during a game it stops the clock ([below](#the-clock)).
 * **MODE**: You vs CPU / 2 players / CPU vs CPU demo / You vs USB / CPU vs USB (below). **SIDE** swaps colours.
 * **SAVE/LOAD**: `/CHESS47/GAME.TXT`. **PGN** writes `/CHESS47/GAME.PGN`
   (with `[Variant "Chess960"]` and `[FEN]` tags when needed).
@@ -121,12 +125,59 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
   lichess analysis board.
 * **USB**: turns the USB serial port on. Every move is sent as UCI text (see below), and every screen as a frame for `tools/dm42view.py` (the screen in your terminal).
 
+### The clock
+
+![CLOCK during a game: the question, then the time used](docs/clock.png)
+
+* **The controls** (minutes + seconds added after each move): OFF, 1+0, 3+2, 5+3, 10+5, 15+10, 25+10, 90+30. 3+2 is
+  FIDE's World Blitz control, 15+10 FIDE's World Rapid, 90+30 the usual classical one; 1+0 is bullet. Shown at the
+  top left (W / B, or R / B in Xiangqi); under 10 s with tenths; an hour or more as 1:30:00.
+* **When it runs**: from the first move (the first move is free), for both sides: the CPU's clock runs while it
+  thinks, and it plans its time to fit. It pauses while the calculator is off. A flag that falls loses the game.
+* **Before the first move** CLOCK (soft-key page 2) cycles the controls freely.
+* **During a game** CLOCK only stops the clock: the first press asks **Stop clock? CLOCK** (the clock keeps
+  running; any other key cancels), the second shows **Clock stopped** and turns each side's time left into its
+  time used so far, counting up from there. A clock can't be set again or refilled in the same game: CLOCK then
+  says **Clock: set at NEW**, as it does when the game is over. Not in the USB modes (there the PC or Lichess keeps
+  the time).
+* **OFF**: the title until the first move, then each side's **time used**, counting up; nobody loses on time.
+  SAVE / LOAD and the autosave keep it.
+* **Chess and Xiangqi each keep their own clock** (its control, its times, stopped or not): SHIFT F1 puts one game
+  aside with its clock waiting and brings the other back as it was.
+* Games saved by v1.1 load with the control at the same place in the list (5+0 becomes 5+3, 10+0 10+5, 30+0
+  25+10, 60+0 90+30) and their clocks' time left as it was.
+
+### The thinking display
+
+![level 9 thinking: chess and Xiangqi](docs/thinking.png)
+
+While the CPU thinks (levels 1–9, and HINT), after each depth of its search:
+
+* the status line: the **depth**, its **best move**, the **score** (`d14 e6 +0.30`: pawns, its own point of view;
+  `M3` a mate in 3);
+* under it, the **expected line**: its move, your reply, its answer … up to 12 moves on two lines (SAN in chess,
+  WXF in Xiangqi);
+* the **counts**: positions searched, positions a second, time (`8.6M  1.3M/s  6.5s`);
+* its **move marked on the board**, with the HINT's frames.
+
+When it has moved, the panel shows the moves again. **SHIFT F6 THINK** hides it (the status line only, as in v1.1)
+or shows it again; saved games keep the choice. EXIT, ENTER or 5 still make it move at once.
+
+The line is the search's main line, kept in a small table of its own (`PVE` in `src/engine_common.h`): the search
+looks at the same positions and plays the same moves as in v1.1 (`test/bench_chess.txt` unchanged). The counts are
+the calculator's own: about 19 000 positions a second on USB power, about half on battery (80 MHz). The pictures
+come from the PC simulator, so their counts are a PC's.
+
 ## Messages
 
 The status line always shows the game's state first: **CHECK!** (inverted) as soon as a king is attacked, even
 while the computer thinks. At the end a box on the board says what happened, why, and the result:
 **CHECKMATE**, **STALEMATE**, **DRAW** (50-move rule, no mating material, 3-fold repetition, agreed), **TIME** (a flag
 fell), **RESIGNS**. With USB on, the result also goes to the PC as a `result 1-0 ...` line.
+
+The status line also answers the keys: **Clock 15+10** (CLOCK before the first move), **Stop clock? CLOCK**,
+**Clock stopped**, **Clock: set at NEW** (CLOCK during a game), **Thinking shown** / **Thinking hidden** (SHIFT F6),
+**Level 9**, **Hint: Nf3**, **Book: e5** (an opening book move), **Thinking...** until the first depth is done.
 
 ## Strength (measured against Stockfish)
 
@@ -343,11 +394,13 @@ python3 tools/dm42view.py --png shots/    # and a PNG of every screen
 
 `web/chess47.html` is Chess 47 in one file for any browser, phone included, offline too: chess and Xiangqi, the
 same screen, soft keys, levels, piece styles, zoom and SHIFT game menu (Shift pressed alone, or the SHIFT button),
-and the engines of `src/engine.c` and `src/xq_engine.c` ported line for line to JavaScript (`web/engine.js`,
+the same clock and thinking display (SHIFT F6), and the engines of `src/engine.c` and `src/xq_engine.c` ported line
+for line to JavaScript (`web/engine.js`,
 `web/xq_engine.js`, in a Web Worker so the page stays responsive). SHIFT 7 (or Shift+7) the Seven Stars. Click or tap a piece, then its square; F1-F6 and the keypad keys work
 as on the calculator. With **DM42n speed** (on by default) the engine searches as many positions as the DM42n on
 USB power would in the same time, so the levels keep the calculator's strength; off, it uses the computer's
-full speed. The game is kept in the browser and resumed; PGN downloads the game, FEN copies the position.
+full speed. Both games and their clocks are kept in the browser and resumed; PGN downloads the game, FEN copies
+the position.
 Chess960 and its number 1701 work too.
 
 ![web](docs/web.png) ![web: Xiangqi](docs/web_xiangqi.png)

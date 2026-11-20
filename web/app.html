@@ -43,14 +43,19 @@
     <canvas id="lcd" width="1200" height="720" aria-label="Chess 47 screen"></canvas>
   </div>
   <div class="opts">
-    <button id="shift" type="button" title="the game menu: XIANGQI / CHESS, PIECES, ZOOM, RESIGN, DRAW (or press Shift alone)">SHIFT</button>
+    <button id="shift" type="button" title="the game menu: XIANGQI / CHESS, PIECES, ZOOM, RESIGN, DRAW, THINK (or press Shift alone)">SHIFT</button>
     <label><input type="checkbox" id="calc" checked> DM42n speed (the calculator's strength; off: this computer's full speed)</label>
     <label><input type="checkbox" id="sound" checked> Sound</label>
   </div>
   <details>
     <summary>Keys</summary>
     <table>
-      <tr><td>SHIFT</td><td>the game menu on the soft keys (Shift pressed alone, or the SHIFT button): F1 XIANGQI / CHESS (each game is kept), F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW</td></tr>
+      <tr><td>SHIFT</td><td>the game menu on the soft keys (Shift pressed alone, or the SHIFT button): F1 XIANGQI / CHESS (each game is kept, with its clock), F2 PIECES, F3 ZOOM, F4 RESIGN, F5 DRAW, F6 THINK</td></tr>
+      <tr><td>THINK</td><td>SHIFT F6: the computer's thinking on / off. While it thinks: depth, best move, score; the expected line;
+        positions searched, a second, time; its move marked on the board</td></tr>
+      <tr><td>CLOCK</td><td>soft-key page 2 (F2): OFF, 1+0, 3+2, 5+3, 10+5, 15+10, 25+10, 90+30 (3+2 FIDE blitz, 15+10 FIDE rapid,
+        90+30 classical), before the first move. During a game CLOCK only stops the clock (twice); OFF shows each side's
+        time used. The next control at NEW</td></tr>
       <tr><td>click / tap</td><td>pick a piece, then its square (castling: the king, then its rook)</td></tr>
       <tr><td>* or x</td><td>the pieces: chess figures / letters; Xiangqi characters / symbols / letters</td></tr>
       <tr><td>+ or -</td><td>zoom: the board the full height, no soft keys (they still work)</td></tr>

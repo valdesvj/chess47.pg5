@@ -602,7 +602,7 @@ static void clock_key(void) {
     }
     clk_off = 1;
     turn_start = now_ms();
-    strcpy(status, "Clock off: time used");
+    strcpy(status, "Clock stopped");
     return;
   }
   strcpy(status, "Clock: set at NEW");
@@ -1195,12 +1195,26 @@ static void game_menu(void) {
   lcd_draw_menu_keys(k);
 }
 
-static void game_switch(void) {                         /* chess <-> Xiangqi, each keeps its game */
+/* each game's clock kept while the other is played: its time control, stopped or not, the two times (left, or used
+   when OFF); [0] chess, [1] Xiangqi. A clock waits while its game is put aside (as with the calculator off) */
+typedef struct { int8_t used, tc, off; int32_t t[2]; } ClockKeep;
+static ClockKeep clk_keep[2];
+
+static void game_switch(void) {                         /* chess <-> Xiangqi, each keeps its game and its clock */
+  int from = xq;
+  ClockKeep *k = &clk_keep[from];
+  k->used = 1; k->tc = cfg.tc; k->off = clk_off;
+  k->t[0] = clock_left(0); k->t[1] = clock_left(1);
   if (xq) { xq = 0; eng_clear_tt(); strcpy(status, "Chess"); refresh_legal(); }
   else if (xq_enter()) { xq = 1; strcpy(status, "Xiangqi"); }
+  if (xq == from) return;                               /* no memory for Xiangqi: the game and clock go on */
   offer = -1;
-  clk_off = 0;
-  clock_reset(); clock_update_live();
+  clk_live = 0;
+  k = &clk_keep[xq];
+  if (k->used) { cfg.tc = k->tc; clk_off = k->off; clk[0] = k->t[0]; clk[1] = k->t[1]; }
+  else { clk_off = 0; clock_reset(); }                  /* the first time: the clock as set */
+  turn_start = now_ms();
+  clock_update_live();
 }
 
 /* ------------------------------------------------------------------ */

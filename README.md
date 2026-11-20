@@ -108,6 +108,9 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
     when the game is over, the control is chosen at NEW.
   * OFF: the title until the first move, then each side's **time used**, counting up (nobody loses on time);
     a clock stopped during the game shows the time each side has used so far. SAVE / LOAD keep it.
+  * Chess and Xiangqi each keep their own clock (control, times, stopped or not): SHIFT F1 puts one game and its
+    clock aside, the clock waiting, and brings the other back as it was. The web version does the same and keeps
+    both clocks when the page is closed.
   * Games saved by v1.1 load with the control at the same place in the list (5+0 becomes 5+3, 10+0 10+5,
     30+0 25+10, 60+0 90+30) and their clocks' time left as it was.
 * **MODE**: You vs CPU / 2 players / CPU vs CPU demo / You vs USB / CPU vs USB (below). **SIDE** swaps colours.

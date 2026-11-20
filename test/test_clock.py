@@ -66,9 +66,9 @@ def main():
                        'F2', 'SNAP:again'])
     ok(r['ask'][1] == 'Stop clock? CLOCK', 'the first press asks', r['ask'][1])
     ok(r['ask'][0] == ['W 9:35', 'B 9:38'], 'and the clock still runs (B 9:45 - 7 s)', r['ask'][0])
-    ok(r['cancel'][1] != 'Clock off: time used' and r['cancel'][0][0] == 'W 9:35', 'another key cancels',
+    ok(r['cancel'][1] != 'Clock stopped' and r['cancel'][0][0] == 'W 9:35', 'another key cancels',
        r['cancel'])
-    ok(r['off'][1] == 'Clock off: time used', 'the second press stops it', r['off'][1])
+    ok(r['off'][1] == 'Clock stopped', 'the second press stops it', r['off'][1])
     ok(r['off'][0] == ['W 0:30', 'B 0:27'], 'each side\'s time used: W 30 s, B 20 + 7 s', r['off'][0])
     ok(r['later'][0] == ['W 0:30', 'B 1:27'], 'then it counts up (B + 60 s)', r['later'][0])
     ok(r['again'][1] == 'Clock: set at NEW', 'a stopped clock is not set again in the game', r['again'][1])
@@ -97,12 +97,27 @@ def main():
                                                   'WAIT:10000', 'SNAP:later'])
     ok(r['a'][0] == ['R 10:00', 'B 10:00'], 'Xiangqi 10+5', r['a'][0])
     ok(r['b'][0] == ['R 10:00', 'B 9:40'], 'Red\'s first move free, Black\'s 20 s', r['b'][0])
-    ok(r['ask'][1] == 'Stop clock? CLOCK' and r['off'][1] == 'Clock off: time used', 'the question, then OFF',
+    ok(r['ask'][1] == 'Stop clock? CLOCK' and r['off'][1] == 'Clock stopped', 'the question, then OFF',
        (r['ask'][1], r['off'][1]))
     ok(r['later'][0] == ['R 0:00', 'B 0:30'], 'the time used counts up: B 30 s', r['later'][0])
     r, _ = run(X + ['SNAP:a'] + C2 + ['WAIT:9000', 'SNAP:b'])
     ok(r['a'][0][0] == 'XIANGQI 47' and r['b'][0] == ['R 0:00', 'B 0:09'], 'OFF: the title, then the time used',
        (r['a'][0], r['b'][0]))
+
+    print('== SHIFT F1: each game keeps its own clock (no time given back)')
+    chess = TWO + CLOCK * 4 + E4 + ['WAIT:20000'] + E5 + ['WAIT:30000'] + D4 + ['WAIT:7000']   # W 9:35, B 9:38
+    r, _ = run(chess + ['SNAP:a', 'SHIFT', 'F1', 'SNAP:x', 'F6', 'F2', 'F2', 'F6', 'F6', 'SNAP:x2'] + C2 +
+               ['WAIT:40000', 'SNAP:x3', 'SHIFT', 'F1', 'SNAP:b', 'WAIT:5000', 'SNAP:c', 'SHIFT', 'F1', 'SNAP:x4'])
+    ok(r['a'][0] == ['W 9:35', 'B 9:38'], 'chess 10+5 before the switch', r['a'][0])
+    ok(r['x'][0] == ['R 10:00', 'B 10:00'], 'Xiangqi the first time: the clock as set (10+5)', r['x'][0])
+    ok(r['x2'][0] == ['R 25:00', 'B 25:00'], 'Xiangqi before its first move: CLOCK twice -> 25+10', r['x2'][0])
+    ok(r['x3'][0] == ['R 25:00', 'B 24:20'], 'Xiangqi 25+10 running (B 40 s)', r['x3'][0])
+    ok(r['b'][0] == ['W 9:35', 'B 9:38'], 'back to chess: its 10+5 times as they were (not 10:00)', r['b'][0])
+    ok(r['c'][0] == ['W 9:35', 'B 9:33'], 'and its clock runs on (B - 5 s)', r['c'][0])
+    ok(r['x4'][0] == ['R 25:00', 'B 24:20'], 'back to Xiangqi: 25+10 kept too', r['x4'][0])
+    r, _ = run(chess + ['F6', 'F2', 'F2', 'F6', 'F6', 'WAIT:10000', 'SHIFT', 'F1', 'SHIFT', 'F1', 'SNAP:a', 'F6', 'F2', 'SNAP:b'])
+    ok(r['a'][0] == ['W 0:30', 'B 0:37'], 'a stopped clock stays stopped (time used) after the switches', r['a'][0])
+    ok(r['b'][1] == 'Clock: set at NEW', 'and is not set again in the game', r['b'][1])
 
     print('%d failed' % bad if bad else 'all ok')
     sys.exit(1 if bad else 0)

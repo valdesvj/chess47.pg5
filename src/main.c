@@ -171,6 +171,14 @@ static void xq_draw_clock(void);
 static void xq_redraw(void);
 static int side_now(void) { return xq ? xq_side() : CUR->side; }
 
+/* Puzzles 47 (src/puzzle.c, SHIFT 4): the panel's header, title and stipulation, and the soft keys */
+static int8_t pz;                  /* puzzle mode */
+static int8_t pz_inv;              /* the puzzle's status highlighted */
+static void pz_draw_head(void);
+static int  pz_draw_lines(int y);
+static int  pz_count(void);
+static void pz_menu(void);
+
 static int32_t clock_left(int side) {
   int32_t c = clk[side];                  /* the time left, or the time used when the clock is OFF */
   if (clk_live && side_now() == side) {
@@ -338,6 +346,7 @@ static void clock_label(char *s, char side, const char *t, int w) {
 }
 
 static void draw_clock(void) {
+  if (pz) { pz_draw_head(); return; }       /* puzzles: "PUZZLES 47  12/47" instead of the clock */
   int h = lh(t20) + 2;
   lcd_fill_rect(0, 0, PANEL_W + 4, h, 0);
   if (!TC && !G->n) {                     /* OFF: the title until the first move, then the time used */
@@ -431,21 +440,22 @@ static void draw_panel(void) {
   draw_clock();
   int y = h + 4;
 
-  /* level + mode */
+  /* level + mode (puzzles: the title and the stipulation) */
   char lv[8];
   sprintf(lv, cfg.level ? "L%s" : "%s", LEVELS[cfg.level].name);
-  if (cfg.mode == MODE_HH) sprintf(s, "2 players");
+  if (pz) { y = pz_draw_lines(y); s[0] = 0; }
+  else if (cfg.mode == MODE_HH) sprintf(s, "2 players");
   else if (cfg.mode == MODE_CC) sprintf(s, "Demo  %s", lv);
   else if (cfg.mode == MODE_USB) sprintf(s, "vs USB  You:%s", cfg.human ? "Black" : "White");
   else if (cfg.mode == MODE_EUSB) sprintf(s, "%s vs USB  CPU:%s", lv, cfg.human ? "Black" : "White");
   else sprintf(s, "%s  You:%s", lv, cfg.human ? "Black" : "White");
-  ptext(2, y, s, 0);
-  y += h;
+  if (!pz) { ptext(2, y, s, 0); y += h; }
 
   /* status line */
   /* the game's state first (the result, check), then the engine's line: the search used to hide "check" */
   int inv = 0;
-  if (G->over) { strcpy(s, result_text(G->over, CUR->side)); inv = 1; }
+  if (pz && status[0]) { strcpy(s, status); inv = pz_inv; }   /* puzzles: Solved!, Not the solution ... */
+  else if (G->over) { strcpy(s, result_text(G->over, CUR->side)); inv = 1; }
   else if (num_mode) sprintf(s, "960 #: %s_", num_buf);
   else if (promo_mode) sprintf(s, "Promote to?");
   else if (in_check(CUR)) { sprintf(s, "CHECK! %s to move", CUR->side ? "Black" : "White"); inv = 1; }
@@ -467,7 +477,8 @@ static void draw_panel(void) {
   }
 
   /* move list: last lines that fit */
-  int bottom = cfg.level == 0 && cfg.mode != MODE_HH ? BOARD_PX - 46 : BOARD_PX - h;
+  int crazy = cfg.level == 0 && cfg.mode != MODE_HH && !pz;
+  int bottom = crazy ? BOARD_PX - 46 : BOARD_PX - h;
   int lines = (bottom - y) / h;
   if (lines < 1) lines = 1;
   int total = (G->n + 1 + (G->hist[0].side == BLACK)) / 2;
@@ -488,7 +499,10 @@ static void draw_panel(void) {
   }
 
   /* footer */
-  if (cfg.level == 0 && cfg.mode != MODE_HH) {
+  if (pz) {
+    sprintf(s, "Solved %d of 47", pz_count());
+    ptext(2, BOARD_PX - h, s, 0);
+  } else if (crazy) {
     draw_bitmap(CRAZY_BMP, CRAZY_W, CRAZY_H, 4, BOARD_PX - 46, 2);
     ptext(60, BOARD_PX - 36, "CRAZY!", 1);
   } else {
@@ -521,6 +535,7 @@ static void draw_menu(void) {
   if (promo_mode) { lcd_draw_menu_keys(PROMO_MENU); return; }   /* Queen Rook Bishop Knight ... Cancel */
   if (shift) { game_menu(); return; }                   /* SHIFT: the game menu, on any page, also in the zoom */
   if (zoom) return;                                     /* zoom: the board the full height (the keys still work) */
+  if (pz) { pz_menu(); return; }                        /* PREV NEXT HINT SOLVE RETRY EXIT */
   const char *keys[6];
   for (int i = 0; i < 6; i++) keys[i] = MENU[cfg.page][i];
 
@@ -1239,12 +1254,14 @@ static const char *menu_line_str(uint8_t id, char *s, const int slen) {
 
 static void *heap_alloc(size_t n);
 #include "xq_ui.c"
+#include "puzzle.c"
 
 /* SHIFT: the game menu, the same in both games: F1 the other game, F2 the pieces' style, F3 the zoom,
    F4 RESIGN, F5 DRAW (ACCEPT when the other side offered one); the soft keys show it while SHIFT is on */
 static void game_menu(void) {
   const char *k[6] = { xq ? "CHESS" : "XIANGQI", "PIECES", zoom ? "NORMAL" : "ZOOM", "RESIGN", "DRAW", "THINK" };
   if (!xq && VS_USB) k[3] = k[4] = "";                 /* vs USB: F4 / F5 of page 1 */
+  if (pz) k[0] = k[3] = k[4] = "";                     /* puzzles: the game put aside is not touched */
   else if (cfg.mode == MODE_HH && offer == (side_now() ^ 1) && !(xq ? XG->over : G->over)) k[4] = "ACCEPT";
   lcd_draw_menu_keys(k);
 }
@@ -1391,6 +1408,7 @@ static void handle_softkey(int k) {
     else if (fn == 5) { promo_mode = 0; sel = NOSQ; }
     return;
   }
+  if (pz) { pz_softkey(fn); return; }                   /* puzzles: PREV NEXT HINT SOLVE RETRY EXIT */
   switch (cfg.page * 6 + fn) {
   case 0:  if (cfg.mode == MODE_HC && !G->over && G->n >= 2) {                        /* NEW */
              if (confirm != 'N') { confirm = 'N'; strcpy(status, "Quit=resign? NEW"); break; }
@@ -1464,8 +1482,12 @@ static void handle_key(int key) {
 
   if (shift) {
     shift = 0;
+    if (pz && (key == KEY_F1 || key == KEY_F4 || key == KEY_F5 || key == KEY_BSP || key == KEY_7)) {
+      strcpy(status, "Puzzles: EXIT first"); pz_inv = 0; return;     /* the game put aside is not touched */
+    }
     switch (key) {
     case KEY_EXIT: SET_ST(STAT_PGM_END); return;                       /* OFF */
+    case KEY_4: if (pz) pz_exit(); else pz_enter(); return;            /* Puzzles 47 (src/puzzle.c) */
     case KEY_0:                                                         /* SETUP */
       SET_ST(STAT_MENU);
       handle_menu(&MID_MENU, MENU_RESET, 0);
@@ -1521,7 +1543,7 @@ static void handle_key(int key) {
   case KEY_3: move_cursor(1, -1); break;
   case KEY_5: case KEY_ENTER: select_square(); break;
   case KEY_EXIT: sel = NOSQ; hint_from = hint_to = NOSQ; break;
-  case KEY_BSP: if (!(VS_USB && usb_decline())) undo(); break;
+  case KEY_BSP: if (pz) pz_back(); else if (!(VS_USB && usb_decline())) undo(); break;
   default: break;
   }
 }
@@ -1661,7 +1683,11 @@ void program_main(void) {
       redraw();
       continue;
     }        /* a line from the PC (vs USB: its move) */
-    if (!xq && cfg.mode != MODE_USB && !(cfg.mode == MODE_EUSB && (usb_hold || usb_side(CUR->side))) &&
+    if (pz && !ST(STAT_PGM_END) && !ST(STAT_SUSPENDED) && !promo_mode && key_empty() && pz_turn()) {
+      redraw();                                            /* puzzles: your move checked, the defence's reply */
+      continue;
+    }
+    if (!xq && !pz && cfg.mode != MODE_USB && !(cfg.mode == MODE_EUSB && (usb_hold || usb_side(CUR->side))) &&
         !ST(STAT_PGM_END) && !ST(STAT_SUSPENDED) && !G->over && !is_human(CUR->side) &&
         !promo_mode && !num_mode && key_empty()) {
       cpu_move();
@@ -1681,7 +1707,7 @@ void program_main(void) {
       if (!ST(STAT_SUSPENDED)) {
         /* going off: pause clock, autosave, draw off image */
         if (clk_live) { clk[side_now()] = clock_left(side_now()); clk_live = 0; }
-        save_game(DIR "/AUTO.TXT");
+        if (pz) pz_poweroff(); else save_game(DIR "/AUTO.TXT");   /* puzzles: the game put aside is kept */
         if (cfg.usb) { usbview_off(); usbser_stop(); cfg.usb = 0; }
         lcd_set_buf_cleared(0);
         draw_power_off_image(1);

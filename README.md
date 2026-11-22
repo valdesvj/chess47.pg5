@@ -16,6 +16,14 @@ This is the native C sister of the RPN `chess47` program for the C47.
 *A 15+10 game against level 4; level 9 thinking (its expected line, the counts, its move marked); Chess960 with the
 clock OFF (each side's time used); the CRAZY level.*
 
+### New in v1.3: Puzzles 47
+
+**SHIFT 4** opens **Puzzles 47**: 47 chess problems, as a newspaper printed them: *White to play and mate in 3*,
+*Black to play and win*, *White to play and draw*. Opening traps, the finishes of famous old games (the Opera Game,
+the Immortal, the Evergreen), and composed problems and endgame studies whose authors died more than 70 years ago
+(Loyd, Turton, Taverner, Shinkman, Heathcote, Stamma, Philidor, Saavedra, Réti, Rinck, Kubbel,
+Liburkin...). Your game waits meanwhile, its clock stopped. See [Puzzles 47](#puzzles-47).
+
 ### New in v1.2
 
 (v1.2.1: the thinking display's expected line always complete; this manual and the screenshots updated.)
@@ -40,6 +48,68 @@ To return to Free42: in Chess 47 press **SHIFT 0 (SETUP) → System**, or use
 
 > DMCP5 holds one program at a time, so loading Chess 47 replaces Free42 until you
 > load the DM42 program again. Your state files on the disk are not touched.
+
+## Puzzles 47
+
+![Puzzles 47: Loyd's Charles XII (1859), and the Opera Game solved](docs/puzzles.png)
+
+**SHIFT 4** puts your game aside (its clock stopped) and shows a puzzle; SHIFT 4 again, or **EXIT**, brings the game
+back as it was. The board turns to the side that plays. The panel shows the puzzle's number (`*` once solved), its
+title, and the task: **White to play and mate in 3**, **Black to play and win**, **White to play and draw**.
+
+| F1 | F2 | F3 | F4 | F5 | F6 |
+|---|---|---|---|---|---|
+| PREV | NEXT | HINT | SOLVE | RETRY | EXIT |
+
+* Play your move with the cursor as in a game; the calculator answers with the defence and checks each of your moves.
+  A wrong one is taken back (**Not the solution**, or **No mate: try again**); **←** takes your last move back.
+* **Mates**: any move that still mates in the moves left is right, not only the published one. The calculator proves
+  it: it tries every defence (a small exact mate solver), and for a long proof it asks the search. The defence
+  plays the published line while you follow it, otherwise the longest resistance it finds.
+* **Studies** (win / draw): the published move at once; another move if a short search finds it keeps the result.
+  Solved after the published line's moves (or a mate, or a draw in a draw study).
+* **HINT**: first the piece to move, a second press the move. **SOLVE** plays the solution. **RETRY** starts again.
+* Your progress (the puzzle shown, the ones solved) is kept in `/CHESS47/PUZZLES.TXT`. Switching the calculator off
+  in the puzzles keeps your game (`AUTO.TXT`), not the puzzle.
+* The web version has them too (Shift+4), its progress kept in the browser.
+
+Every puzzle is checked by `make puzzle-test` (`tools/puzzles_check.py`, python-chess and Stockfish): a mate in
+exactly *n* with one first move only, a study's first move the only one that wins (or draws), and the solution's line
+keeping the result. Problems with a second solution (a *cook*) were left out. `test/test_puzzles.py` (the simulator)
+and `test/test_web_puzzles.py` (the web, Playwright) play them.
+
+The positions are in the public domain: composed problems and studies whose authors died more than 70 years ago,
+and positions from famous old games and opening traps (game moves are facts, not works). Four of them tell
+**Loyd's story of Charles XII at Bender** (1859): the king announces mate in 3; a Turkish bullet knocks his knight off
+the board, and he mates in 4 without it; a second bullet takes a pawn: mate in 5; and Amelung's version (1900), the
+rook hit instead of the knight: mate in 6.
+
+| # | Puzzle | To play | # | Puzzle | To play |
+|---:|---|---|---:|---|---|
+| 1 | Fool's mate | Black, mate in 1 | 25 | Loyd: the second bullet | White, mate in 5 |
+| 2 | Scholar's mate | White, mate in 1 | 26 | Amelung 1900: no rook | White, mate in 6 |
+| 3 | Smothered mate (Caro-Kann) | White, mate in 1 | 27 | T. Taverner, 1889 | White, mate in 2 |
+| 4 | Kieninger trap (Budapest) | Black, mate in 1 | 28 | G. Heathcote, 1905 | White, mate in 2 |
+| 5 | Halosar trap (Blackmar-Diemer) | White, mate in 1 | 29 | H. Turton, 1856 | White, mate in 3 |
+| 6 | Legall - Saint Brie, 1750 | White, mate in 2 | 30 | W. Shinkman, 1910 | White, mate in 3 |
+| 7 | Morphy: the Opera Game, 1858 | White, mate in 2 | 31 | Loyd 1903: Steinitz Gambit | White, mate in 3 |
+| 8 | Greco - NN, 1620 | White, mate in 2 | 32 | The Evergreen Game, 1852 | White wins |
+| 9 | Fishing Pole trap (Ruy Lopez) | Black, mate in 2 | 33 | The Evergreen Game, 1852 | White, mate in 4 |
+| 10 | Stafford Gambit trap | Black, mate in 2 | 34 | Paulsen - Morphy, 1857 | Black wins |
+| 11 | P. Morphy, about 1850 | White, mate in 2 | 35 | Lasker - Bauer, 1889 | White wins |
+| 12 | Elephant trap (Queen's Gambit) | Black wins | 36 | Ed. Lasker - Thomas, 1912 | White, mate in 7 |
+| 13 | Noah's Ark trap (Ruy Lopez) | Black wins | 37 | Loyd 1861: Excelsior | White, mate in 5 |
+| 14 | Siberian trap (Smith-Morra) | Black wins | 38 | Saavedra & Barbier, 1895 | White wins |
+| 15 | Magnus Smith trap (Sicilian) | White wins | 39 | R. Reti, 1921 | White draws |
+| 16 | Tarrasch trap (Ruy Lopez) | White wins | 40 | R. Reti, 1928 | White draws |
+| 17 | Lasker trap (Albin) | Black wins | 41 | Lasker & Reichhelm, 1901 | White wins |
+| 18 | The pawn breakthrough | White wins | 42 | A. D. Philidor, 1777 | White wins |
+| 19 | Ph. Stamma, 1737 | White, mate in 3 | 43 | Lasker - Tarrasch, 1914 | White draws |
+| 20 | NN - Greco, 1620 | Black, mate in 3 | 44 | Yates - Marshall, 1929 | Black draws |
+| 21 | The Immortal Game, 1851 | White, mate in 3 | 45 | H. Rinck, 1950 | White wins |
+| 22 | Reti - Tartakower, 1910 | White, mate in 3 | 46 | L. Kubbel, 1922 | White wins |
+| 23 | Loyd 1859: Charles XII | White, mate in 3 | 47 | M. Liburkin, 1931 | White wins |
+| 24 | Loyd: the first bullet | White, mate in 4 | | | |
 
 ## Xiangqi (Chinese chess), experimental
 
@@ -99,6 +169,7 @@ draw. The famous line starts 炮二平四 卒5平6 兵四進一 將6進1 俥三�
 | **SHIFT F4** RESIGN | resign (press SHIFT F4 twice). Against the CPU you resign; with 2 players the side to move |
 | **SHIFT F5** DRAW | offer a draw. The CPU accepts when it is worse, or from move 20 when it is not better. With 2 players the other side sees **ACCEPT** on F5 on its turn (press twice); a move declines |
 | **NEW** in a game | against the CPU an unfinished game counts as resigned: NEW twice (the result shows), NEW again for the next game |
+| **SHIFT 4** | **Puzzles 47**: the chess problems ([below](#puzzles-47)); SHIFT 4 or EXIT again: back to your game |
 | **SHIFT Σ+** | info screen |
 | **SHIFT F6** THINK | the CPU's thinking shown / hidden ([below](#the-thinking-display)) |
 

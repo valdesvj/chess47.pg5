@@ -73,11 +73,16 @@ const BMP = window.CHESS47_BMP;                           /* src/pieces.h, made 
 /* ---- state ---- */
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem('chess47.' + k)); } catch (e) { return null; } },
-  set(k, v) { try { localStorage.setItem('chess47.' + k, JSON.stringify(v)); } catch (e) { /* private window */ } },
+  set(k, v) {
+    if (pz && k === 'auto') return;                       /* puzzles: the game put aside stays the saved one, */
+    if (pz && k === 'cfg') v = Object.assign({}, v, pz_aside.cfg);   /* with its settings */
+    try { localStorage.setItem('chess47.' + k, JSON.stringify(v)); } catch (e) { /* private window */ }
+  },
 };
 const cfg = Object.assign({ level: 4, mode: MODE_HC, human: WHITE, flip: 0, tc: 0, sound: 1, page: 0, calc: 1,
                             game: 'chess', pstyle: 0, xstyle: 0, zoom: 0, think: 1 }, store.get('cfg') || {});
-let xq = cfg.game === 'xq' ? 1 : 0;                       /* the game on the screen: 0 chess, 1 Xiangqi */
+let xq = cfg.game === 'xq' ? 1 : 0;
+let pz = 0;                                               /* Puzzles 47 (Shift+4): the game put aside, not saved over */                       /* the game on the screen: 0 chess, 1 Xiangqi */
 let shift = 0;                                            /* SHIFT: the game menu on the soft keys */
 const G = { hist: [E.newPos()], moves: [], san: [], keys: [], n: 0, over: 0, pos960: -1, legal: [], start: null, rfile: [7, 0], c960: 0 };
 let cur = 0x14, sel = NOSQ, hint_from = NOSQ, hint_to = NOSQ, last_from = NOSQ, last_to = NOSQ;
@@ -609,6 +614,7 @@ const accept_pending = () => cfg.mode === MODE_HH && offer === (CUR().side ^ 1) 
 function softkey(fn) {
   if (info_screen) { info_screen = 0; return; }
   if (shift && !promo_mode) { game_menu(fn); return; }
+  if (pz && !promo_mode) { pz_softkey(fn); return; }       /* PREV NEXT HINT SOLVE RETRY EXIT */
   if (xq) { xq_softkey(fn); return; }
   if (promo_mode) {
     if (fn < 4 && promo_opts[fn]) { promo_mode = 0; do_move(promo_opts[fn]); }
@@ -649,10 +655,11 @@ function softkey(fn) {
 
 function key(k, shifted) {
   if (info_screen) { info_screen = 0; return; }
-  if (shifted && k === 'Backspace') { shift = 0; if (xq) xq_resign(1); else resign(1); return; }
+  if (shifted && k === 'Backspace') { shift = 0; if (pz) return; if (xq) xq_resign(1); else resign(1); return; }
   if (k === 'i') { info_screen = 1; return; }
   if (k === 'Escape' && shift) { shift = 0; return; }
-  if (shift && k === '7') { shift = 0; xq_seven(); return; }
+  if (shift && k === '4') { shift = 0; pz_toggle(); return; }   /* Puzzles 47 */
+  if (shift && k === '7') { shift = 0; if (pz) { status = 'Puzzles: EXIT first'; return; } xq_seven(); return; }
   shift = 0;
   if (promo_mode) { if (k === 'Escape') { promo_mode = 0; sel = NOSQ; } return; }
   if (k === '*' || k === 'x') { piece_style(); return; }
@@ -670,8 +677,232 @@ function key(k, shifted) {
   case '3': move_cursor(1, -1); break;
   case '5': case 'Enter': case ' ': select_square(); break;
   case 'Escape': if (thinking) move_now(); sel = NOSQ; hint_from = hint_to = NOSQ; break;
-  case 'Backspace': undo(); break;
+  case 'Backspace': if (pz) pz_back(); else undo(); break;
   }
+}
+
+/* ======== Puzzles 47 (src/puzzle.c, Shift+4): 47 chess problems in the public domain (src/puzzles.h) ======== */
+const PZS = window.PUZZLES47;                             /* tools/build_web.py: { fen, kind, n, title, line } */
+const PZ_MENU = ['PREV', 'NEXT', 'HINT', 'SOLVE', 'RETRY', 'EXIT'];
+let pz_aside = null, pz_i = 0, pz_checked = 0, pz_done = 0, pz_hint = 0, pz_inv = 0, pz_from_xq = 0;
+const pz_solved = Object.assign(new Array(PZS.length).fill(0), (store.get('puzzles') || {}).solved || []);
+pz_i = Math.min(PZS.length - 1, Math.max(0, ((store.get('puzzles') || {}).cur || 1) - 1));
+const PZ = () => PZS[pz_i];
+const pz_count = () => pz_solved.reduce((a, b) => a + (b ? 1 : 0), 0);
+const pz_save = () => store.set('puzzles', { cur: pz_i + 1, solved: pz_solved });
+function pz_line_move(k, p) {
+  const u = PZ().line.split(' ')[k];
+  return u ? E.str_to_move(p, u) : 0;
+}
+const pz_line_len = () => PZ().line.split(' ').length;
+function pz_on_line() { geometry(); for (let k = 0; k < G.n; k++) if (pz_line_move(k, G.hist[k]) !== G.moves[k]) return 0; return 1; }
+function pz_stip() {
+  const side = G.hist[0].side ? 'Black' : 'White';
+  return PZ().kind === 'MATE' ? `${side} to play and mate in ${PZ().n}` : `${side} to play and ${PZ().kind === 'WIN' ? 'win' : 'draw'}`;
+}
+
+/* the exact mate solver (src/puzzle.c): the moves on one stack, the positions searched counted */
+const pz_buf = new Uint32Array(E.MAXMOVES * 24);
+let pz_nodes = 0, pz_abort = 0;
+const PZ_CAP = 400000;
+function pz_no_legal(p, o) {
+  const n = o + E.gen_moves(p, pz_buf, 0, o), c = E.newPos();   /* gen_moves: the count */
+  for (let i = o; i < n; i++) if (E.make_move(p, c, pz_buf[i])) return 0;
+  return 1;
+}
+function pz_att(p, n, o) {                                /* the side to move mates in n or fewer moves */
+  const e = o + E.gen_moves(p, pz_buf, 0, o), c = E.newPos();
+  for (let pass = 0; pass < (n > 1 ? 2 : 1); pass++)
+    for (let i = o; i < e; i++) {
+      if (!E.make_move(p, c, pz_buf[i])) continue;
+      const chk = E.in_check(c) ? 1 : 0;
+      if (chk !== (pass === 0 ? 1 : 0)) continue;
+      if (++pz_nodes > PZ_CAP) { pz_abort = 1; return 0; }
+      if (chk && pz_no_legal(c, e)) return 1;
+      if (n > 1 && pz_def(c, n - 1, e)) return 1;
+      if (pz_abort) return 0;
+    }
+  return 0;
+}
+function pz_def(p, n, o) {                                /* every move allows mate in n (none: mated yes, stalemate no) */
+  const e = o + E.gen_moves(p, pz_buf, 0, o), c = E.newPos();
+  let legal = 0;
+  for (let i = o; i < e; i++) {
+    if (!E.make_move(p, c, pz_buf[i])) continue;
+    legal++;
+    if (++pz_nodes > PZ_CAP) { pz_abort = 1; return 0; }
+    if (!pz_att(c, n, e)) return 0;
+  }
+  return legal ? 1 : E.in_check(p) ? 1 : 0;
+}
+
+function pz_start(i) {
+  if (thinking) move_now_discard();
+  pz_i = (i + PZS.length) % PZS.length;
+  E.chess960 = 0; E.c_rfile[0] = 7; E.c_rfile[1] = 0;
+  const p = E.newPos();
+  if (!E.pos_from_fen(p, PZ().fen)) E.pos_start(p);
+  cfg.mode = MODE_HC; cfg.human = p.side; cfg.flip = p.side; cfg.tc = 0;
+  new_game_from(p, -1);
+  pz_checked = 0; pz_done = 0; pz_hint = 0; pz_inv = 0;
+  pz_save();
+}
+function pz_enter() {
+  if (xq) { game_switch(); pz_from_xq = 1; } else pz_from_xq = 0;
+  if (thinking) move_now_discard();
+  if (clk_live) { clk[side_now()] = clock_left(side_now()); clk_live = 0; }
+  pz_aside = { game: serialize(), cfg: { mode: cfg.mode, human: cfg.human, flip: cfg.flip, tc: cfg.tc }, over: G.over, resigner };
+  pz = 1; cfg.zoom = 0;
+  pz_start(pz_i);
+}
+function pz_exit() {
+  if (thinking) move_now_discard();
+  pz = 0;
+  Object.assign(cfg, pz_aside.cfg);
+  const snd = cfg.sound; cfg.sound = 0;                   /* the moves replayed without their clicks */
+  if (!deserialize(pz_aside.game)) new_game(-1);
+  cfg.sound = snd;
+  if (pz_aside.over >= 6 && !G.over) { G.over = pz_aside.over; resigner = pz_aside.resigner; clk_live = 0; }
+  pz_save(); save_auto();
+  status = 'Game resumed';
+  if (pz_from_xq) game_switch();
+}
+function pz_solved_now() {
+  pz_done = 1; pz_solved[pz_i] = 1;
+  status = `Solved! ${pz_count()} of ${PZS.length}`; pz_inv = 1;
+  pz_save(); beep(1320, 120);
+}
+function pz_wrong(why) {
+  G.n--;
+  G.hist.length = G.n + 1; G.moves.length = G.n; G.san.length = G.n; G.keys.length = G.n + 1;
+  G.over = 0;
+  last_from = last_to = NOSQ;
+  if (G.n) { last_from = MFROM(G.moves[G.n - 1]); last_to = MTO(G.moves[G.n - 1]); }
+  refresh_legal();
+  pz_checked = G.n;
+  status = why; pz_inv = 1; beep(220, 200);
+}
+async function pz_search(ms) {                            /* the best move and its score (for the side to move) */
+  thinking = 1; think = { pv: [], nodes: 0, t0: now() };
+  const n0 = G.n;
+  const r = await run_search(40, ms, 0, d => { think_info(d); redraw(); });
+  thinking = 0; think = null; hint_from = hint_to = NOSQ;
+  return r.discard || G.n !== n0 || !pz ? null : r;
+}
+/* the game loop's turn in puzzles: the solver's last move checked, then the defence */
+async function pz_turn() {
+  if (G.n < pz_checked) pz_checked = G.n;
+  if (pz_done || G.n === pz_checked) return;
+  const solver = G.hist[0].side;
+  if (CUR().side === solver) { pz_checked = G.n; return; }
+  const z = PZ(), k = (G.n - 1) >> 1, online = pz_on_line(), n0 = G.n;
+  pz_checked = G.n; pz_inv = 0;
+  if (z.kind === 'MATE') {
+    const left = z.n - k - 1;
+    if (G.over === 1) { pz_solved_now(); return; }
+    if (G.over || left < 1) { pz_wrong(left < 1 ? 'No mate: try again' : 'Not the solution'); return; }
+    if (!online) {
+      status = 'Checking...'; redraw();
+      geometry(); pz_nodes = 0; pz_abort = 0;
+      let good = pz_def(CUR(), left, 0);
+      if (pz_abort) {                                     /* too long to prove: the search's mate score */
+        const r = await pz_search(3000);
+        if (!r) return;
+        const s = -r.score;
+        good = s > E.MATE - 2 * E.MAXPLY && (E.MATE - s + 1) / 2 <= left;
+      }
+      if (!good) { pz_wrong('Not the solution'); return; }
+    }
+  } else {
+    const need = (pz_line_len() + 1) >> 1;
+    if (G.over === 1) { pz_solved_now(); return; }
+    if (G.over) { if (z.kind === 'DRAW') pz_solved_now(); else pz_wrong('A draw: try again'); return; }
+    if (!online) {
+      status = 'Checking...'; redraw();
+      const r = await pz_search(3000);
+      if (!r) return;
+      const s = -r.score;
+      if (z.kind === 'WIN' ? s < 250 : s <= -100) { pz_wrong('Not the solution'); return; }
+    }
+    if (k + 1 >= need) { pz_solved_now(); return; }
+  }
+  geometry();
+  let m = online ? pz_line_move(G.n, CUR()) : 0;
+  if (!m) { const r = await pz_search(1500); if (!r) return; m = r.best || G.legal[0]; }
+  await sleep(250);
+  if (!pz || G.n !== n0) return;
+  do_move(m);
+  pz_checked = G.n;
+  if (G.over) { if (z.kind === 'DRAW') pz_solved_now(); else { status = G.over === 1 ? 'Mated: RETRY' : 'A draw: RETRY'; pz_inv = 1; } }
+  else status = 'Your move';
+}
+async function pz_hint_key() {
+  if (pz_done || G.over || thinking || CUR().side !== G.hist[0].side) return;
+  let m = pz_on_line() ? pz_line_move(G.n, CUR()) : 0;
+  if (!m) { status = 'Thinking...'; redraw(); const r = await pz_search(1500); if (!r) return; m = r.best; }
+  if (!m) return;
+  geometry();
+  pz_hint = pz_hint >= 1 ? 2 : 1;
+  hint_from = MFROM(m);
+  hint_to = pz_hint === 2 ? (MFLAGS(m) & F_CASTLE ? E.castle_rook_sq(CUR(), m) : MTO(m)) : NOSQ;
+  status = pz_hint === 2 ? 'Hint: ' + E.move_to_san(CUR(), m) : 'Hint: this piece';
+  pz_inv = 0;
+  redraw();
+}
+async function pz_solve() {
+  pz_start(pz_i);
+  const i0 = pz_i, n = pz_line_len();
+  status = 'The solution'; pz_done = 2; redraw();
+  for (let k = 0; k < n; k++) {
+    await sleep(700);
+    if (!pz || pz_i !== i0 || G.n !== k) return;          /* another key meanwhile */
+    geometry();
+    const m = pz_line_move(k, CUR());
+    if (!m) break;
+    do_move(m);
+    status = 'The solution'; redraw();
+  }
+  pz_checked = G.n;
+}
+function pz_back() {
+  if (!G.n || pz_done === 1 || thinking) return;
+  const plies = CUR().side === G.hist[0].side && G.n >= 2 ? 2 : 1;
+  G.n -= plies;
+  G.hist.length = G.n + 1; G.moves.length = G.n; G.san.length = G.n; G.keys.length = G.n + 1;
+  G.over = 0; pz_done = 0;
+  sel = hint_from = hint_to = last_from = last_to = NOSQ;
+  if (G.n) { last_from = MFROM(G.moves[G.n - 1]); last_to = MTO(G.moves[G.n - 1]); }
+  refresh_legal();
+  pz_checked = G.n; status = ''; pz_inv = 0;
+}
+function pz_softkey(fn) {
+  switch (fn) {
+  case 0: pz_start(pz_i - 1); break;
+  case 1: pz_start(pz_i + 1); break;
+  case 2: pz_hint_key(); break;
+  case 3: pz_solve(); break;
+  case 4: pz_start(pz_i); break;
+  case 5: pz_exit(); break;
+  }
+}
+function pz_toggle() { if (pz) pz_exit(); else pz_enter(); }
+/* the panel: "PUZZLES 47  12/47", the title (three lines at most) and the stipulation (two) wrapped; returns the y below */
+function pz_wrap(y, txt, max) {
+  ctx.font = FONT;
+  const w = PANEL_W - 4, lines = [];
+  let line = '';
+  for (const word of txt.split(' ')) {
+    const t = line ? line + ' ' + word : word;
+    if (line && ctx.measureText(t).width / S > w) { lines.push(line); line = word; } else line = t;
+  }
+  if (line) lines.push(line);
+  for (const l of lines.slice(0, max)) { ptext(2, y, l, 0); y += LH; }
+  return y;
+}
+function pz_draw_head() {
+  ptext(2, 1, 'PUZZLES 47', 1);
+  const s = `${pz_solved[pz_i] ? '* ' : ''}${pz_i + 1}/${PZS.length}`;
+  ctx.font = FONT; ptext(PANEL_W - Math.ceil(ctx.measureText(s).width / S), 1, s, 0);
 }
 
 /* ======== Xiangqi (src/xq_ui.c): the same levels, clock, modes and keys; WXF moves ======== */
@@ -950,6 +1181,7 @@ function piece_style() {
 function zoom_toggle() { cfg.zoom ^= 1; status = cfg.zoom ? 'Zoom: +/- back' : 'Normal view'; store.set('cfg', cfg); }
 function game_menu(fn) {
   shift = 0;
+  if (pz && (fn === 0 || fn === 3 || fn === 4)) { status = 'Puzzles: EXIT first'; pz_inv = 0; return; }
   if (!(fn === 3 && confirm === 'R') && !(fn === 4 && confirm === 'A')) confirm = '';
   switch (fn) {
   case 0: game_switch(); break;
@@ -1129,6 +1361,7 @@ function draw_square(sq) {
   }
 }
 const texts = [];                                          /* [x, y, text, inverse, centred width] at 400 x 240 */
+window.chess47_texts = () => texts.map(t => t[2]);         /* the screen's texts (test/test_web_puzzles.py) */
 function ptext(x, y, s, inv) {
   ctx.font = FONT;
   while (s && x + ctx.measureText(s).width / S > PANEL_EDGE) s = s.slice(0, -1);
@@ -1140,7 +1373,8 @@ const material = () => { const v = [0, 1, 3, 3, 5, 9, 0]; let s = 0; const b = C
 
 function draw_panel() {
   const h = LH;
-  if (!TC() && !G.n) {                                    /* OFF: the title until the first move, then the time used */
+  if (pz) pz_draw_head();
+  else if (!TC() && !G.n) {                                    /* OFF: the title until the first move, then the time used */
     ptext(2, 1, 'CHESS 47', 1);
     const s = G.pos960 >= 0 ? '960 #' + G.pos960 : G.c960 ? 'FEN' : 'web';
     ctx.font = FONT; ptext(PANEL_W - Math.ceil(ctx.measureText(s).width / S), 1, s, 0);
@@ -1152,11 +1386,15 @@ function draw_panel() {
   }
   let y = h + 4;
   const lv = cfg.level ? 'L' + LEVELS[cfg.level].name : LEVELS[cfg.level].name;
-  ptext(2, y, cfg.mode === MODE_HH ? '2 players' : cfg.mode === MODE_CC ? 'Demo  ' + lv : `${lv}  You:${cfg.human ? 'Black' : 'White'}`, 0);
-  y += h;
+  if (pz) y = pz_wrap(pz_wrap(y, PZ().title, 3), pz_stip(), 2);   /* puzzles: the title and the stipulation */
+  else {
+    ptext(2, y, cfg.mode === MODE_HH ? '2 players' : cfg.mode === MODE_CC ? 'Demo  ' + lv : `${lv}  You:${cfg.human ? 'Black' : 'White'}`, 0);
+    y += h;
+  }
   geometry();
   let s, inv = 0;
-  if (G.over) { s = result_text(G.over, CUR().side); inv = 1; }
+  if (pz && status) { s = status; inv = pz_inv; }
+  else if (G.over) { s = result_text(G.over, CUR().side); inv = 1; }
   else if (promo_mode) s = 'Promote to?';
   else if (E.in_check(CUR())) { s = `CHECK! ${CUR().side ? 'Black' : 'White'} to move`; inv = 1; }
   else if (status) s = status;
@@ -1167,7 +1405,7 @@ function draw_panel() {
   fill(2, y, PANEL_W - 4, 1, 1);
   y += 3;
   y = draw_think(y, PANEL_W - 4);                         /* the CPU's thinking, above the moves */
-  const crazy = cfg.level === 0 && cfg.mode !== MODE_HH;
+  const crazy = cfg.level === 0 && cfg.mode !== MODE_HH && !pz;
   const bottom = crazy ? BOARD_PX - 46 : BOARD_PX - h;
   const lines = Math.max(1, Math.floor((bottom - y) / h));
   const h0 = G.hist[0], total = Math.floor((G.n + 1 + (h0.side === BLACK ? 1 : 0)) / 2);
@@ -1179,7 +1417,8 @@ function draw_panel() {
     ptext(2, y, (h0.fullmove + ln) + '.', 0); ptext(40, y, w, 0); ptext(112, y, b, 0);
     y += h;
   }
-  if (crazy) {
+  if (pz) ptext(2, BOARD_PX - h, `Solved ${pz_count()} of ${PZS.length}`, 0);
+  else if (crazy) {
     const c = BMP.crazy;
     for (let j = 0; j < c.length; j++) for (let i = 0; i < c[j].length; i++) if (c[j][i] === '#') fill(4 + i * 2, BOARD_PX - 46 + j * 2, 2, 2, 1);
     ptext(60, BOARD_PX - 36, 'CRAZY!', 1);
@@ -1192,12 +1431,13 @@ const menu_boxes = [];
 /* SHIFT: the game menu, the same in both games: the other game, the pieces' style, the zoom, RESIGN, DRAW */
 function game_menu_keys() {
   const acc = cfg.mode === MODE_HH && offer === (side_now() ^ 1) && !over_now();
+  if (pz) return ['', 'PIECES', cfg.zoom ? 'NORMAL' : 'ZOOM', '', '', 'THINK'];   /* puzzles: the game put aside is not touched */
   return [xq ? 'CHESS' : 'XIANGQI', 'PIECES', cfg.zoom ? 'NORMAL' : 'ZOOM', 'RESIGN', acc ? 'ACCEPT' : 'DRAW', 'THINK'];
 }
 function draw_menu() {
   menu_boxes.length = 0;
   if (cfg.zoom && !shift && !promo_mode) return;          /* zoom: the board the full height (the keys still work) */
-  const keys = shift && !promo_mode ? game_menu_keys() : xq ? XQ_MENU[cfg.page] : promo_mode ? PROMO_MENU : MENU[cfg.page].map((k, i) => cfg.page === 1 && i === 0 && G.c960 ? '960*' :
+  const keys = shift && !promo_mode ? game_menu_keys() : pz && !promo_mode ? PZ_MENU : xq ? XQ_MENU[cfg.page] : promo_mode ? PROMO_MENU : MENU[cfg.page].map((k, i) => cfg.page === 1 && i === 0 && G.c960 ? '960*' :
     accept_pending() && ((cfg.page === 0 && i === 4) || (cfg.page === 1 && i === 4)) ? 'ACCEPT' : k);
   const w = 64, gap = (LCD_X - 6 * w) / 5;
   for (let i = 0; i < 6; i++) {
@@ -1257,7 +1497,8 @@ document.addEventListener('keydown', ev => {
   if (ev.key === 'Shift') { shift_alone = 1; return; }
   shift_alone = 0;
   const fk = /^F([1-6])$/.exec(ev.key);
-  if (ev.code === 'Digit7' && ev.shiftKey) { ev.preventDefault(); xq_seven(); }
+  if (ev.code === 'Digit7' && ev.shiftKey) { ev.preventDefault(); if (pz) status = 'Puzzles: EXIT first'; else xq_seven(); }
+  else if (ev.code === 'Digit4' && ev.shiftKey) { ev.preventDefault(); pz_toggle(); }
   else if (fk) { ev.preventDefault(); if (ev.shiftKey) shift = 1; softkey(+fk[1] - 1); }
   else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' ', 'Escape', 'Backspace',
             '1', '2', '3', '4', '5', '6', '7', '8', '9', 'i', '*', 'x', '+', '-'].includes(ev.key)) { ev.preventDefault(); key(ev.key, ev.shiftKey); }
@@ -1309,6 +1550,13 @@ async function tick_game() {
     try { await xq_cpu_move(); } finally { busy = 0; }
     redraw();
     if (cfg.mode === MODE_CC) setTimeout(tick_game, 400); else tick_game();
+    return;
+  }
+  if (pz) {                                               /* puzzles: your move checked, the defence's reply */
+    if (busy || thinking || promo_mode || info_screen) return;
+    busy = 1;
+    try { await pz_turn(); } finally { busy = 0; }
+    redraw();
     return;
   }
   if (busy || thinking || G.over || promo_mode || info_screen) return;

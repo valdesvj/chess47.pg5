@@ -536,7 +536,16 @@ function evaluate(p) {
 }
 
 /* ---- search ---- */
-const SP_RFP = 90, SP_FUT = 150, SP_LMP = 4;               /* as src/search.inc */
+const SP_RFP = 90, SP_FUT = 150, SP_LMP = 4, SP_ASP = 25;  /* as src/search.inc */
+/* the late move reductions (src/lmr.h): 0.75 + ln(depth) ln(move number) / 2.25 (test/test_web.js: the C's table) */
+const LMR_T = new Uint8Array(32 * 64);
+for (let d = 1; d < 32; d++) for (let m = 1; m < 64; m++) LMR_T[d * 64 + m] = Math.floor(0.75 + Math.log(d) * Math.log(m) / 2.25);
+/* the history with gravity (src/search.inc hist_add) */
+function hist_add(idx, bonus) {
+  let v = hh[idx];
+  v += bonus - ((v * (bonus < 0 ? -bonus : bonus) / 16384) | 0);
+  hh[idx] = v > 16000 ? 16000 : v < -16000 ? -16000 : v;
+}
 let nodes = 0, stop = 0, t0 = 0, L = null, root_best = 0, root_score = 0;
 
 function check_stop() {
@@ -551,6 +560,23 @@ function is_rep(p) {
 const score_to_tt = (s, ply) => s > MATE - 2 * MAXPLY ? s + ply : s < -MATE + 2 * MAXPLY ? s - ply : s;
 const score_from_tt = (s, ply) => s > MATE - 2 * MAXPLY ? s - ply : s < -MATE + 2 * MAXPLY ? s + ply : s;
 
+const HIDX = (p, m) => (p.b[MFROM(m)] << 7) | MTO(m);
+/* a capture likely to lose material (src/engine.c chess_badcap) */
+function badcap(p, m) {
+  if ((MFLAGS(m) & F_EP) || MPROMO(m)) return 0;
+  const att = PTYPE(p.b[MFROM(m)]), vic = PTYPE(p.b[MTO(m)]);
+  if (att === KING) return 0;
+  return VAL[att] - VAL[vic] > 50 && attacked(p, MTO(m), p.side ^ 1) ? 1 : 0;
+}
+/* the hash table in buckets of two (src/search.inc tt_entry, SP_TT2): the position's entry, else the one to replace
+   (the shallower, or older: ttF's bits 2-7 are the search's number) */
+function tt_entry(p) {
+  const e = p.lo & (tt_n - 2);
+  if (ttH[e] === p.hi && ttL[e] === p.lo) return e;
+  if (ttH[e + 1] === p.hi && ttL[e + 1] === p.lo) return e + 1;
+  const a0 = (pv_age - (ttF[e] >> 2)) & 63, a1 = (pv_age - (ttF[e + 1] >> 2)) & 63;
+  return ttD[e] - 8 * a0 <= ttD[e + 1] - 8 * a1 ? e : e + 1;
+}
 function order(p, o, n, ttm, ply) {
   for (let i = o; i < o + n; i++) {
     const m = mbuf[i];
@@ -559,10 +585,11 @@ function order(p, o, n, ttm, ply) {
     else if (MFLAGS(m) & F_CAP) {
       const vic = MFLAGS(m) & F_EP ? PAWN : PTYPE(p.b[MTO(m)]);
       v = 1000000 + vic * 100 - PTYPE(p.b[MFROM(m)]);
+      if (badcap(p, m)) v -= 3000000;
     } else if (MPROMO(m) === QUEEN) v = 950000;
     else if (m === killer[ply * 2]) v = 900000;
     else if (m === killer[ply * 2 + 1]) v = 800000;
-    else v = hh[(p.b[MFROM(m)] << 7) | MTO(m)];
+    else v = hh[HIDX(p, m)];
     if (MPROMO(m) && MPROMO(m) !== QUEEN) v -= 2000000;
     sbuf[i] = v;
   }
@@ -580,6 +607,13 @@ function qsearch(ply, alpha, beta) {
   const p = stk[ply];
   if ((++nodes & 1023) === 0) check_stop();
   if (stop) return 0;
+  {                                                      /* the hash table's bounds (src/search.inc SP_QTT) */
+    const e = tt_entry(p);
+    if (ttH[e] === p.hi && ttL[e] === p.lo && ttD[e] >= 0 && beta - alpha === 1) {
+      const s = score_from_tt(ttS[e], ply), f = ttF[e] & 3;
+      if (f === TT_EXACT || (f === TT_LOWER && s >= beta) || (f === TT_UPPER && s <= alpha)) return s;
+    }
+  }
   const stand = evaluate(p);
   if (ply >= MAXPLY - 1) return stand;
   if (stand >= beta) return stand;
@@ -595,6 +629,7 @@ function qsearch(ply, alpha, beta) {
       const vic = MFLAGS(m) & F_EP ? PAWN : PTYPE(p.b[MTO(m)]);
       if (stand + VAL[vic] + 200 < alpha) continue;
     }
+    if (sbuf[o + i] < 0) continue;                       /* a losing capture */
     if (!make_move(p, stk[ply + 1], m)) continue;
     const s = -qsearch(ply + 1, -beta, -alpha);
     if (stop) return 0;
@@ -625,19 +660,24 @@ function negamax(ply, depth, alpha, beta, can_null) {
   if (stop) return 0;
   if (ply && (p.half >= 100 || is_rep(p))) return 0;
   if (ply >= MAXPLY - 2) return evaluate(p);
+  if (ply) {                                              /* mate distance pruning */
+    if (alpha < -MATE + ply) alpha = -MATE + ply;
+    if (beta > MATE - ply - 1) beta = MATE - ply - 1;
+    if (alpha >= beta) return alpha;
+  }
   const incheck = in_check(p);
   if (incheck) depth++;
   if (depth <= 0) return qsearch(ply, alpha, beta);
 
-  const e = p.lo & (tt_n - 1);
-  let ttm = 0;
+  let e = tt_entry(p), ttm = 0;
   if (ttH[e] === p.hi && ttL[e] === p.lo) {
     ttm = ttM[e];
     if (ply && ttD[e] >= depth) {
       const s = score_from_tt(ttS[e], ply);
-      if (ttF[e] === TT_EXACT) return s;
-      if (ttF[e] === TT_LOWER && s >= beta) return s;
-      if (ttF[e] === TT_UPPER && s <= alpha) return s;
+      const f = ttF[e] & 3;
+      if (f === TT_EXACT) return s;
+      if (f === TT_LOWER && s >= beta) return s;
+      if (f === TT_UPPER && s <= alpha) return s;
     }
   }
 
@@ -687,8 +727,14 @@ function negamax(ply, depth, alpha, beta, can_null) {
     if (legal === 1) s = -negamax(ply + 1, depth - 1, -bt, -a, 1);
     else {
       let r = 0;
-      if (depth >= 3 && legal > 3 && quiet && !incheck && !gives && m !== killer[ply * 2] && m !== killer[ply * 2 + 1])
-        r = legal > 10 ? 2 : 1;
+      if (depth >= 3 && legal > 2 && quiet && !incheck && !gives) {
+        r = LMR_T[(depth > 31 ? 31 : depth) * 64 + (legal > 63 ? 63 : legal)];
+        if (pv) r--;
+        if (m === killer[ply * 2] || m === killer[ply * 2 + 1]) r--;
+        r -= (hh[HIDX(p, m)] / 8192) | 0;
+        if (r < 0) r = 0;
+        if (r > depth - 2) r = depth - 2;
+      }
       s = -negamax(ply + 1, depth - 1 - r, -a - 1, -a, 1);
       if (s > a && r) s = -negamax(ply + 1, depth - 1, -a - 1, -a, 1);
       if (s > a && s < bt) s = -negamax(ply + 1, depth - 1, -bt, -a, 1);
@@ -704,9 +750,12 @@ function negamax(ply, depth, alpha, beta, can_null) {
         if (s >= beta) {
           if (quiet) {
             if (killer[ply * 2] !== m) { killer[ply * 2 + 1] = killer[ply * 2]; killer[ply * 2] = m; }
-            const idx = (p.b[MFROM(m)] << 7) | MTO(m);
-            const v = hh[idx] + depth * depth;
-            hh[idx] = v > 30000 ? 30000 : v;
+            const bonus = depth > 13 ? 1600 : 8 * depth * depth + 16 * depth;
+            for (let j = 0; j < i; j++) {                 /* the quiet moves tried before it lose as much */
+              const q = mbuf[o + j];
+              if (!(MFLAGS(q) & F_CAP) && !MPROMO(q)) hist_add(HIDX(p, q), -bonus);
+            }
+            hist_add(HIDX(p, m), bonus);
           }
           break;
         }
@@ -721,11 +770,12 @@ function negamax(ply, depth, alpha, beta, can_null) {
       pvhH[q] = p.hi; pvhL[q] = p.lo; pvhM[q] = bm; pvhD[q] = depth; pvhA[q] = pv_age;
     }
   }
+  e = tt_entry(p);                                       /* again: the children may have stored here */
   if (ttH[e] !== p.hi || ttL[e] !== p.lo || depth >= ttD[e] || best >= beta) {
     ttH[e] = p.hi; ttL[e] = p.lo; ttM[e] = bm;
     ttS[e] = score_to_tt(best, ply);
     ttD[e] = depth;
-    ttF[e] = best >= beta ? TT_LOWER : best <= orig ? TT_UPPER : TT_EXACT;
+    ttF[e] = (best >= beta ? TT_LOWER : best <= orig ? TT_UPPER : TT_EXACT) | (pv_age & 63) << 2;
   }
   return best;
 }
@@ -746,7 +796,7 @@ function search_pv(root, first, max) {
     const k = n.hi + ',' + n.lo;
     if (seen.has(k)) break;
     seen.add(k); pv.push(m); p = n;
-    const q = p.lo & (PVH_N - 1), e = p.lo & (tt_n - 1);
+    const q = p.lo & (PVH_N - 1), e = tt_entry(p);
     m = pvhH[q] === p.hi && pvhL[q] === p.lo ? pvhM[q] : ttH[e] === p.hi && ttL[e] === p.lo ? ttM[e] : 0;
   }
   return pv;
@@ -771,9 +821,21 @@ function search(root, keys, lim) {
   mofs[0] = 0;
   const maxd = lim.depth < 1 ? 1 : lim.depth > MAXPLY - 8 ? MAXPLY - 8 : lim.depth;
   for (let d = 1; d <= maxd; d++) {
-    root_best = 0;
-    const s = negamax(0, d, -INF, INF, 1);
-    if (root_best) { R.best = root_best; R.score = stop ? root_score : s; R.depth = d; }
+    let s, a = -INF, b = INF, delta = SP_ASP;
+    if (d >= 5 && !IS_MATE(R.score)) { a = R.score - delta; b = R.score + delta; }   /* aspiration window */
+    for (;;) {
+      root_best = 0;
+      s = negamax(0, d, a, b, 1);
+      if (stop) {
+        if (root_best && root_score > a) { R.best = root_best; R.score = root_score; R.depth = d; }
+        break;
+      }
+      if (s <= a && a > -INF) { b = ((a + b) / 2) | 0; a = s - delta < -INF ? -INF : s - delta; }
+      else if (s >= b && b < INF) { if (root_best) { R.best = root_best; R.score = s; } b = s + delta > INF ? INF : s + delta; }
+      else { if (root_best) { R.best = root_best; R.score = s; R.depth = d; } break; }
+      delta += delta;
+      if (delta > 600) { a = -INF; b = INF; }
+    }
     if (stop) break;
     if (lim.info) lim.info(d, R.score, nodes, R.best);
     if (n === 1 && d >= 2) break;
@@ -789,7 +851,7 @@ Object.assign(E, {
   WHITE, BLACK, BLK, NOSQ, INF, MATE, MV, MFROM, MTO, MPROMO, MFLAGS, PTYPE, PCOLOR, SQ, FILE_OF, RANK_OF, ONBOARD,
   IS_MATE, newPos, copyPos, ksq, eng_init, eng_clear_tt, pos_from_fen, pos_to_fen, pos_start, pos_960, attacked,
   in_check, insufficient, gen_moves, gen_legal, make_move, perft, castle_rook_sq, move_to_str, str_to_move,
-  move_to_san, game_state, evaluate, search, search_pv, sqname,
+  move_to_san, game_state, evaluate, search, search_pv, sqname, LMR_T,
 });
 G.Chess47 = E;
 if (typeof module !== 'undefined') module.exports = E;

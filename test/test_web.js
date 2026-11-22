@@ -26,6 +26,11 @@ for (const line of input.trim().split('\n')) {
   console.log((ok ? 'ok    ' : 'FAIL  ') + got + (ok ? '' : '\n  C:   ' + want[i]));
   i++;
 }
+// the late move reductions: the JS table (Math.log) = src/lmr.h
+const lmr = fs.readFileSync(path.join(ROOT, 'src', 'lmr.h'), 'utf8').match(/\{([\d,]+)\}/g).map(r => r.slice(1, -1).split(',').map(Number)).flat();
+const okLmr = lmr.length === 32 * 64 && lmr.every((v, i) => v === E.LMR_T[i]);
+console.log((okLmr ? 'ok    ' : 'FAIL  ') + 'LMR table = src/lmr.h');
+if (!okLmr) fails++;
 // the 960 numbering: 518 is normal chess
 const q = E.newPos(); E.pos_960(q, 518);
 const ok518 = E.pos_to_fen(q).startsWith('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w HAha');

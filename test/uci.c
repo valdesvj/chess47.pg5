@@ -93,7 +93,9 @@ static void go(const char *l) {
 int main(int argc, char **argv) {
   if (argc > 1 && !strcmp(argv[1], "-q")) verbose = 0;
   srand((unsigned)now_ms());
-  if (!eng_init(xa, 64u << 20)) return 1;
+  /* the hash table: 64 MB, or C47_HASH_KB (the calculator has up to 1024 KB: tests at its size) */
+  size_t hb = getenv("C47_HASH_KB") ? (size_t)atoi(getenv("C47_HASH_KB")) << 10 : 64u << 20;
+  if (!eng_init(xa, hb)) return 1;
   pos_start(&hist[0]);
   keys[0] = hist[0].key;
   char line[16384];

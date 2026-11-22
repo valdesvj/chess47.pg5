@@ -78,7 +78,7 @@ function xq_init(entries) {
   hh.fill(0);
 }
 /* as the C's eng_clear_tt(): the table and the killers; Xiangqi's history stays (xq_init clears it) */
-function xq_clear_tt() { pvhH.fill(0); pvhL.fill(0); pvhM.fill(0); ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); killer.fill(0); }
+function xq_clear_tt() { pvhH.fill(0); pvhL.fill(0); pvhM.fill(0); ttH.fill(0); ttL.fill(0); ttM.fill(0); ttS.fill(0); ttD.fill(0); ttF.fill(0); killer.fill(0); hh.fill(0); }
 
 function compute_key(p) {
   let h = p.side ? zsH : 0, l = p.side ? zsL : 0;
@@ -422,7 +422,16 @@ function xq_evaluate(p) {
 
 /* ---- the search: src/search.inc with Xiangqi's hooks ---- */
 const ORDV = [0, 9, 2, 2, 4, 6, 5, 1];
-const SP_RFP = 90, SP_FUT = 150, SP_LMP = 4;               /* as src/search.inc */
+const SP_RFP = 90, SP_FUT = 150, SP_LMP = 4, SP_ASP = 25;  /* as src/search.inc */
+/* the late move reductions (src/lmr.h): 0.75 + ln(depth) ln(move number) / 2.25 (test/test_web.js: the C's table) */
+const LMR_T = new Uint8Array(32 * 64);
+for (let d = 1; d < 32; d++) for (let m = 1; m < 64; m++) LMR_T[d * 64 + m] = Math.floor(0.75 + Math.log(d) * Math.log(m) / 2.25);
+/* the history with gravity (src/search.inc hist_add) */
+function hist_add(idx, bonus) {
+  let v = hh[idx];
+  v += bonus - ((v * (bonus < 0 ? -bonus : bonus) / 16384) | 0);
+  hh[idx] = v > 16000 ? 16000 : v < -16000 ? -16000 : v;
+}
 let nodes = 0, stop = 0, t0 = 0, L = null, root_best = 0, root_score = 0;
 
 function check_stop() {
@@ -438,12 +447,21 @@ const score_to_tt = (s, ply) => s > MATE - 2 * MAXPLY ? s + ply : s < -MATE + 2 
 const score_from_tt = (s, ply) => s > MATE - 2 * MAXPLY ? s - ply : s < -MATE + 2 * MAXPLY ? s + ply : s;
 const HIDX = (p, m) => (p.b[XFROM(m)] << 8) | XTO(m);
 
+/* a capture likely to lose material (src/xq_engine.c xq_badcap) */
+function badcap(p, m) {
+  const att = XTYPE(p.b[XFROM(m)]), vic = XTYPE(p.b[XTO(m)]);
+  if (att === XKING) return 0;
+  return XVAL[att] - XVAL[vic] > 50 && xq_attacked(p, XTO(m), p.side ^ 1) ? 1 : 0;
+}
 function order(p, o, n, ttm, ply) {
   for (let i = o; i < o + n; i++) {
     const m = mbuf[i];
     let v;
     if (m === ttm) v = 1 << 30;
-    else if (XFLAGS(m) & XF_CAP) v = 1000000 + ORDV[XTYPE(p.b[XTO(m)])] * 100 - ORDV[XTYPE(p.b[XFROM(m)])];
+    else if (XFLAGS(m) & XF_CAP) {
+      v = 1000000 + ORDV[XTYPE(p.b[XTO(m)])] * 100 - ORDV[XTYPE(p.b[XFROM(m)])];
+      if (badcap(p, m)) v -= 3000000;
+    }
     else if (m === killer[ply * 2]) v = 900000;
     else if (m === killer[ply * 2 + 1]) v = 800000;
     else v = hh[HIDX(p, m)];
@@ -463,6 +481,13 @@ function qsearch(ply, alpha, beta) {
   const p = stk[ply];
   if ((++nodes & 1023) === 0) check_stop();
   if (stop) return 0;
+  {                                                      /* the hash table's bounds (src/search.inc SP_QTT) */
+    const e = p.lo & (tt_n - 1);
+    if (ttH[e] === p.hi && ttL[e] === p.lo && ttD[e] >= 0 && beta - alpha === 1) {
+      const s = score_from_tt(ttS[e], ply), f = ttF[e] & 3;
+      if (f === TT_EXACT || (f === TT_LOWER && s >= beta) || (f === TT_UPPER && s <= alpha)) return s;
+    }
+  }
   const stand = xq_evaluate(p);
   if (ply >= MAXPLY - 1) return stand;
   if (stand >= beta) return stand;
@@ -475,6 +500,7 @@ function qsearch(ply, alpha, beta) {
   for (let i = 0; i < n; i++) {
     const m = pick(o, n, i);
     if (stand + XVAL[XTYPE(p.b[XTO(m)])] + 200 < alpha) continue;
+    if (sbuf[o + i] < 0) continue;                       /* a losing capture */
     if (!xq_make_move(p, stk[ply + 1], m)) continue;
     const s = -qsearch(ply + 1, -beta, -alpha);
     if (stop) return 0;
@@ -505,6 +531,11 @@ function negamax(ply, depth, alpha, beta, can_null) {
   if (stop) return 0;
   if (ply && (p.half >= 120 || is_rep(p))) return 0;
   if (ply >= MAXPLY - 2) return xq_evaluate(p);
+  if (ply) {                                              /* mate distance pruning */
+    if (alpha < -MATE + ply) alpha = -MATE + ply;
+    if (beta > MATE - ply - 1) beta = MATE - ply - 1;
+    if (alpha >= beta) return alpha;
+  }
   const incheck = xq_in_check(p);
   if (incheck) depth++;
   if (depth <= 0) return qsearch(ply, alpha, beta);
@@ -565,8 +596,14 @@ function negamax(ply, depth, alpha, beta, can_null) {
     if (legal === 1) s = -negamax(ply + 1, depth - 1, -bt, -a, 1);
     else {
       let r = 0;
-      if (depth >= 3 && legal > 3 && quiet && !incheck && !gives && m !== killer[ply * 2] && m !== killer[ply * 2 + 1])
-        r = legal > 10 ? 2 : 1;
+      if (depth >= 3 && legal > 2 && quiet && !incheck && !gives) {
+        r = LMR_T[(depth > 31 ? 31 : depth) * 64 + (legal > 63 ? 63 : legal)];
+        if (pv) r--;
+        if (m === killer[ply * 2] || m === killer[ply * 2 + 1]) r--;
+        r -= (hh[HIDX(p, m)] / 8192) | 0;
+        if (r < 0) r = 0;
+        if (r > depth - 2) r = depth - 2;
+      }
       s = -negamax(ply + 1, depth - 1 - r, -a - 1, -a, 1);
       if (s > a && r) s = -negamax(ply + 1, depth - 1, -a - 1, -a, 1);
       if (s > a && s < bt) s = -negamax(ply + 1, depth - 1, -bt, -a, 1);
@@ -582,9 +619,12 @@ function negamax(ply, depth, alpha, beta, can_null) {
         if (s >= beta) {
           if (quiet) {
             if (killer[ply * 2] !== m) { killer[ply * 2 + 1] = killer[ply * 2]; killer[ply * 2] = m; }
-            const idx = HIDX(p, m);
-            const v = hh[idx] + depth * depth;
-            hh[idx] = v > 30000 ? 30000 : v;
+            const bonus = depth > 13 ? 1600 : 8 * depth * depth + 16 * depth;
+            for (let j = 0; j < i; j++) {                 /* the quiet moves tried before it lose as much */
+              const q = mbuf[o + j];
+              if (!(XFLAGS(q) & XF_CAP)) hist_add(HIDX(p, q), -bonus);
+            }
+            hist_add(HIDX(p, m), bonus);
           }
           break;
         }
@@ -649,9 +689,21 @@ function xq_search(root, keys, lim) {
   mofs[0] = 0;
   const maxd = lim.depth < 1 ? 1 : lim.depth > MAXPLY - 8 ? MAXPLY - 8 : lim.depth;
   for (let d = 1; d <= maxd; d++) {
-    root_best = 0;
-    const s = negamax(0, d, -INF, INF, 1);
-    if (root_best) { R.best = root_best; R.score = stop ? root_score : s; R.depth = d; }
+    let s, a = -INF, b = INF, delta = SP_ASP;
+    if (d >= 5 && !IS_MATE(R.score)) { a = R.score - delta; b = R.score + delta; }   /* aspiration window */
+    for (;;) {
+      root_best = 0;
+      s = negamax(0, d, a, b, 1);
+      if (stop) {
+        if (root_best && root_score > a) { R.best = root_best; R.score = root_score; R.depth = d; }
+        break;
+      }
+      if (s <= a && a > -INF) { b = ((a + b) / 2) | 0; a = s - delta < -INF ? -INF : s - delta; }
+      else if (s >= b && b < INF) { if (root_best) { R.best = root_best; R.score = s; } b = s + delta > INF ? INF : s + delta; }
+      else { if (root_best) { R.best = root_best; R.score = s; R.depth = d; } break; }
+      delta += delta;
+      if (delta > 600) { a = -INF; b = INF; }
+    }
     if (stop) break;
     if (lim.info) lim.info(d, R.score, nodes, R.best);
     if (n === 1 && d >= 2) break;

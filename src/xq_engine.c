@@ -30,7 +30,7 @@ static Move    *mbuf;
 static int32_t *sbuf;
 static uint16_t mofs[MAXPLY + 2];
 static Move   (*killer)[2];
-static int16_t *hh;                        /* history [16 * 256] */
+static int16_t *hh;                        /* history [16 * 256]: chess's (eng_shared) */
 static uint64_t *rep;
 static int      rep_n;
 static Move    *scratch;
@@ -57,17 +57,16 @@ static uint64_t rnd64(void) { uint64_t x = rs; x ^= x << 13; x ^= x >> 7; x ^= x
 int xq_init(void *(*alloc)(size_t)) {
   const EngShared *sh = eng_shared();
   tt = (TTE *)sh->tt; tt_n = sh->tt_n;
-  mbuf = sh->mbuf; sbuf = sh->sbuf; killer = sh->killer; rep = sh->rep; scratch = sh->scratch; pvh = sh->pvh;
+  mbuf = sh->mbuf; sbuf = sh->sbuf; killer = sh->killer; rep = sh->rep; scratch = sh->scratch; pvh = sh->pvh; hh = sh->hh;
   if (!tt || !mbuf) return 0;
   if (!zp) {
     zp = alloc(14 * 90 * sizeof(uint64_t));
     stk = alloc((MAXPLY + 2) * sizeof(Pos));
-    hh = alloc(16 * 256 * sizeof(int16_t));
-    if (!zp || !stk || !hh) return 0;
+    if (!zp || !stk) return 0;
     for (int i = 0; i < 14 * 90; i++) zp[i] = rnd64();
     zside = rnd64();
   }
-  memset(hh, 0, 16 * 256 * sizeof(int16_t));
+  memset(hh, 0, HH_N * sizeof(int16_t));
   return 1;
 }
 
@@ -479,6 +478,12 @@ static inline int32_t xq_tactical(const Pos *p, Move m) {
   return 1000000 + ORDV[XTYPE(p->b[XTO(m)])] * 100 - ORDV[XTYPE(p->b[XFROM(m)])];
 }
 
+static inline int xq_badcap(const Pos *p, Move m) {
+  int att = XTYPE(p->b[XFROM(m)]), vic = XTYPE(p->b[XTO(m)]);
+  if (att == XKING) return 0;
+  return XVAL[att] - XVAL[vic] > 50 && xq_attacked(p, XTO(m), p->side ^ 1);
+}
+
 static int has_pieces(const Pos *p) {
   for (int r = 0; r < 10; r++)
     for (int f = 0; f < 9; f++) {
@@ -502,6 +507,7 @@ static inline void xq_null(const Pos *p, Pos *n) { *n = *p; n->side ^= 1; n->key
 #define G_NULL_MOVE(p, n)      xq_null(p, n)
 #define G_QUIET(m)             (!(XFLAGS(m) & XF_CAP))
 #define G_NOLEGAL(chk, ply)    (-MATE + (ply))
+#define G_BADCAP(p, m)         xq_badcap(p, m)
 
 #define PV_NAME xq_search_pv
 #include "search.inc"

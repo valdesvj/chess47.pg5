@@ -29,7 +29,7 @@ static Move    *mbuf;                 /* shared move stack */
 static int32_t *sbuf;                 /* move ordering scores */
 static uint16_t mofs[MAXPLY + 2];
 static Move   (*killer)[2];           /* [MAXPLY][2] */
-static int16_t *hh;                   /* history [16*128] */
+static int16_t *hh;                   /* history [16*256]: chess uses 16*128, Xiangqi all (shared) */
 static uint64_t *rep;                 /* repetition keys: game + search path */
 static int      rep_n;
 static Move    *scratch;              /* [MAXMOVES] for SAN etc. */
@@ -53,7 +53,7 @@ int eng_init(void *(*alloc)(size_t), size_t tt_bytes) {
   mbuf    = alloc(MBUF * sizeof(Move));
   sbuf    = alloc(MBUF * sizeof(int32_t));
   killer  = alloc(MAXPLY * 2 * sizeof(Move));
-  hh      = alloc(16 * 128 * sizeof(int16_t));
+  hh      = alloc(HH_N * sizeof(int16_t));
   rep     = alloc((MAXGAME + MAXPLY + 8) * sizeof(uint64_t));
   scratch = alloc(MAXMOVES * sizeof(Move));
   pvh     = alloc(PVH_N * sizeof(PVE));
@@ -78,7 +78,7 @@ size_t eng_tt_bytes(void) { return (size_t)tt_n * sizeof(TTE); }
 void eng_clear_tt(void) {
   memset(tt, 0, tt_n * sizeof(TTE));
   memset(pvh, 0, PVH_N * sizeof(PVE));
-  memset(hh, 0, 16 * 128 * sizeof(int16_t));
+  memset(hh, 0, HH_N * sizeof(int16_t));
   memset(killer, 0, MAXPLY * 2 * sizeof(Move));
 }
 
@@ -623,12 +623,15 @@ int evaluate(const Pos *p) {
   memset(pcnt, 0, sizeof pcnt);
   memset(pmin, 8, sizeof pmin);
   memset(pmax, -1, sizeof pmax);
+  uint8_t pl[32];                              /* the pawns and rooks, for the second pass */
+  int npl = 0;
 
   for (int s = 0; s < 128; s++) {
     if (s & 0x88) { s += 7; continue; }
     int pc = b[s];
     if (!pc) continue;
     int c = PCOLOR(pc), ty = PTYPE(pc), f = FILE_OF(s), r = RANK_OF(s);
+    if ((ty == PAWN || ty == ROOK) && npl < 32) pl[npl++] = (uint8_t)s;
     int idx = c ? (r * 8 + f) : ((7 - r) * 8 + f);
     phase += PHASE[ty];
     if (ty == KING) {
@@ -665,10 +668,8 @@ int evaluate(const Pos *p) {
   }
 
   /* pawn structure + rooks on files */
-  for (int s = 0; s < 128; s++) {
-    if (s & 0x88) { s += 7; continue; }
-    int pc = b[s];
-    if (!pc) continue;
+  for (int i = 0; i < npl; i++) {
+    int s = pl[i], pc = b[s];
     int c = PCOLOR(pc), ty = PTYPE(pc), f = FILE_OF(s) + 1, r = RANK_OF(s);
     if (ty == PAWN) {
       if (!pcnt[c][f - 1] && !pcnt[c][f + 1]) { mg[c] -= 10; eg[c] -= 15; }
@@ -753,6 +754,13 @@ static inline int chess_qprune(const Pos *p, Move m, int stand, int alpha) {
   return stand + VAL[vic] + 200 < alpha;
 }
 
+static inline int chess_badcap(const Pos *p, Move m) {
+  if ((MFLAGS(m) & F_EP) || MPROMO(m)) return 0;
+  int att = PTYPE(p->b[MFROM(m)]), vic = PTYPE(p->b[MTO(m)]);
+  if (att == KING) return 0;                  /* a king's capture is legal only if the point is not defended */
+  return VAL[att] - VAL[vic] > 50 && attacked(p, MTO(m), p->side ^ 1);
+}
+
 static inline void chess_null(const Pos *p, Pos *n) {
   *n = *p;
   n->side ^= 1;
@@ -763,7 +771,7 @@ static inline void chess_null(const Pos *p, Pos *n) {
 
 const EngShared *eng_shared(void) {
   static EngShared sh;
-  sh.tt = tt; sh.tt_n = tt_n; sh.mbuf = mbuf; sh.sbuf = sbuf; sh.killer = killer; sh.rep = rep; sh.scratch = scratch; sh.pvh = pvh;
+  sh.tt = tt; sh.tt_n = tt_n; sh.mbuf = mbuf; sh.sbuf = sbuf; sh.killer = killer; sh.rep = rep; sh.scratch = scratch; sh.pvh = pvh; sh.hh = hh;
   return &sh;
 }
 
@@ -778,6 +786,8 @@ const EngShared *eng_shared(void) {
 #define G_NULL_MOVE(p, n)      chess_null(p, n)
 #define G_QUIET(m)             (!(MFLAGS(m) & F_CAP) && !MPROMO(m))
 #define G_NOLEGAL(chk, ply)    ((chk) ? -MATE + (ply) : 0)
+#define G_BADCAP(p, m)         chess_badcap(p, m)
 
+#define SP_TT2                 1     /* the hash table in buckets of two (Xiangqi: no gain) */
 #define PV_NAME search_pv
 #include "search.inc"

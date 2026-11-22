@@ -16,6 +16,28 @@ This is the native C sister of the RPN `chess47` program for the C47.
 *A 15+10 game against level 4; level 9 thinking (its expected line, the counts, its move marked); Chess960 with the
 clock OFF (each side's time used); the CRAZY level.*
 
+### New in v1.4: stronger engines (chess and Xiangqi)
+
+The search that both games share was improved. Each change was kept only if it won in A/B matches of hundreds of
+games (`test/ab.py`, the calculator's 1 MB hash table):
+
+- aspiration windows at the root;
+- losing captures ordered last and skipped in the quiescence search;
+- late move reductions from a table (by depth and move number), adjusted by the history;
+- history with penalties for the quiet moves that failed;
+- the hash table probed in the quiescence search, plus mate distance pruning;
+- in chess, the hash table in buckets of two entries.
+
+Against v1.3 (800 games at equal time, 400 at the higher levels' node budget):
+
+| | equal time (~ level 6) | 100k nodes (~ level 8 on USB power) |
+|---|---|---|
+| Chess | **+81 Elo** (±22) | **+85 Elo** (±30) |
+| Xiangqi | **+49 Elo** (±22) | **+94 Elo** (±30) |
+
+Levels 1–3 search only 1–3 plies with random noise, so the changes affect them little. The web version has the same
+engines, node for node (`test/test_web.js`, `test/test_web_xq.js`).
+
 ### New in v1.3: Puzzles 47
 
 **SHIFT 4** opens **Puzzles 47**: 47 chess problems, as a newspaper printed them: *White to play and mate in 3*,

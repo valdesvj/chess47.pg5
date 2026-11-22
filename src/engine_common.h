@@ -51,7 +51,9 @@ typedef struct {
   uint64_t *rep;
   Move     *scratch;
   PVE      *pvh;
+  int16_t  *hh;                    /* the history: HH_N entries */
 } EngShared;
+#define HH_N (16 * 256)
 const EngShared *eng_shared(void);
 void eng_clear_tt(void);
 

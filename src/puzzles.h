@@ -1,0 +1,116 @@
+/*
+ * CHESS47 for DM42n (DMCP5) - Puzzles 47: 47 chess problems in the public domain, as a newspaper printed them
+ * (C) 2026 Victor Valdes - GPL-3.0-or-later
+ *
+ * The positions: composed problems and studies whose authors died more than 70 years ago, and positions from famous
+ * old games and opening traps (game moves are facts, not works). Each one checked by tools/puzzles_check.py
+ * (python-chess + Stockfish): a mate in exactly n, the first move the only one; a study's first move the only one
+ * that wins (or draws). The line: the solution in UCI from the position, the solver's moves first, then the
+ * defence; a study's line its first moves (any move that keeps the result is accepted: src/puzzle.c).
+ * Included by src/puzzle.c and read by tools/build_web.py and tools/puzzles_check.py.
+ */
+#ifndef CHESS47_PUZZLES_H
+#define CHESS47_PUZZLES_H
+
+enum { PZ_MATE = 0, PZ_WIN, PZ_DRAW };
+typedef struct { const char *fen; unsigned char kind, n; const char *title; const char *line; } Puzzle;
+
+static const Puzzle PUZZLES[] = {
+  /*  1 */ { "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2", PZ_MATE, 1, "Fool's mate",
+           "d8h4" },
+  /*  2 */ { "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4", PZ_MATE, 1, "Scholar's mate",
+           "h5f7" },
+  /*  3 */ { "r1bqkb1r/pp1npppp/2p2n2/8/3PN3/8/PPP1QPPP/R1B1KBNR w KQkq - 3 6", PZ_MATE, 1, "Smothered mate (Caro-Kann)",
+           "e4d6" },
+  /*  4 */ { "r1b1k2r/ppppqppp/2n5/4n3/1PP2B2/5N2/1P1NPPPP/R2QKB1R b KQkq - 0 8", PZ_MATE, 1, "Kieninger trap (Budapest)",
+           "e5d3" },
+  /*  5 */ { "rn2kb1r/ppp1pppp/5n2/1N6/1q6/4Bb2/PPP3PP/2KR1BNR w kq - 0 9", PZ_MATE, 1, "Halosar trap (Blackmar-Diemer)",
+           "b5c7" },
+  /*  6 */ { "rn1qkbnr/ppp2p1p/3p2p1/4N3/2B1P3/2N5/PPPP1PPP/R1BbK2R w KQkq - 0 6", PZ_MATE, 2, "Legall - Saint Brie, 1750",
+           "c4f7 e8e7 c3d5" },
+  /*  7 */ { "4kb1r/p2n1ppp/4q3/4p1B1/4P3/1Q6/PPP2PPP/2KR4 w k - 0 16", PZ_MATE, 2, "Morphy: the Opera Game, 1858",
+           "b3b8 d7b8 d1d8" },
+  /*  8 */ { "rn1qkb1r/p1ppp2p/1p3nP1/7Q/3P4/3B4/PPP2PbP/RNB1K1NR w KQkq - 1 7", PZ_MATE, 2, "Greco - NN, 1620",
+           "g6h7 f6h5 d3g6" },
+  /*  9 */ { "r1b1kb1r/pppp1pp1/2n5/1B2N3/4P1pq/5P2/PPPP2P1/RNBQ1RK1 b kq - 0 8", PZ_MATE, 2, "Fishing Pole trap (Ruy Lopez)",
+           "g4g3 d2d4 h4h1" },
+  /* 10 */ { "r1bBk2r/ppp2ppp/2p5/2b5/4n3/3P4/PPP2PPP/RN1QKB1R b KQkq - 0 7", PZ_MATE, 2, "Stafford Gambit trap",
+           "c5f2 e1e2 c8g4" },
+  /* 11 */ { "kbK5/pp6/1P6/8/8/8/R7/8 w - - 0 1", PZ_MATE, 2, "P. Morphy, about 1850",
+           "a2a6 b7a6 b6b7" },
+  /* 12 */ { "r1bqkb1r/pppn1ppp/5n2/3N2B1/3P4/8/PP2PPPP/R2QKBNR b KQkq - 0 6", PZ_WIN, 0, "Elephant trap (Queen's Gambit)",
+           "f6d5 g5d8 f8b4 d1d2 e8d8 e2e3 b4d2 e1d2 a7a5" },
+  /* 13 */ { "r1bqkbnr/2p2ppp/p2p4/1p6/3QP3/1B6/PPP2PPP/RNB1K2R b KQkq - 0 8", PZ_WIN, 0, "Noah's Ark trap (Ruy Lopez)",
+           "c7c5 d4c3 c5c4 a2a4 c4b3 a4b5 g8f6 c1e3 b3c2" },
+  /* 14 */ { "r1b1kb1r/ppqp1ppp/2n1p3/8/2B1P1n1/2N2N1P/PP2QPP1/R1B2RK1 b kq - 0 9", PZ_WIN, 0, "Siberian trap (Smith-Morra)",
+           "c6d4 h3g4 d4e2 c4e2 f8c5 c3b5 c7b8 e4e5 a7a6" },
+  /* 15 */ { "r1bqkb1r/p3pp1p/2p2np1/4p3/2B5/2N5/PPP2PPP/R1BQK2R w KQkq - 0 9", PZ_WIN, 0, "Magnus Smith trap (Sicilian)",
+           "c4f7 e8f7 d1d8 f8g7 d8c7 c8f5 e1g1 f6d7 c7c6" },
+  /* 16 */ { "r4rk1/2pqbppp/p1n1b3/1p1pP3/3Nn3/1BP5/PP3PPP/RNBQR1K1 w - - 5 12", PZ_WIN, 0, "Tarrasch trap (Ruy Lopez)",
+           "d4e6 f7e6 e1e4 e7c5 c1e3 d7e7 e3c5 e7c5 e4e2" },
+  /* 17 */ { "rnbqk1nr/ppp2ppp/8/4P3/1BP5/8/PP2KpPP/RN1Q1BNR b kq - 1 7", PZ_WIN, 0, "Lasker trap (Albin)",
+           "f2g1n e2e1 d8h4 e1d2 b8c6 d1e1 h4f4 d2c3 c8g4" },
+  /* 18 */ { "8/ppp5/8/PPP5/8/8/8/k6K w - - 0 1", PZ_WIN, 0, "The pawn breakthrough",
+           "b5b6 a7b6 c5c6 b7c6 a5a6 a1b2 a6a7 c6c5 a7a8q" },
+  /* 19 */ { "8/8/8/8/8/p2N4/k1K5/8 w - - 0 1", PZ_MATE, 3, "Ph. Stamma, 1737",
+           "d3b4 a2a1 c2c1 a3a2 b4c2" },
+  /* 20 */ { "r1b2rk1/pppp1ppp/8/2b1P3/2B3nq/5N2/PP3PPP/RNBQR1K1 b - - 2 11", PZ_MATE, 3, "NN - Greco, 1620",
+           "h4f2 g1h1 f2g1 f3g1 g4f2" },
+  /* 21 */ { "r1b1k1nr/p2p1ppp/n2B4/1p1NPN1P/6P1/3P1Q2/P1P1K3/q5b1 w kq - 2 21", PZ_MATE, 3, "The Immortal Game, 1851",
+           "f5g7 e8d8 f3f6 g8f6 d6e7" },
+  /* 22 */ { "rnb1kb1r/pp3ppp/2p5/4q3/4n3/3Q4/PPPB1PPP/2KR1BNR w kq - 0 9", PZ_MATE, 3, "Reti - Tartakower, 1910",
+           "d3d8 e8d8 d2g5 d8c7 g5d8" },
+  /* 23 */ { "8/6R1/7p/5K1k/8/6p1/5bPP/4N3 w - - 0 1", PZ_MATE, 3, "Loyd 1859: Charles XII",
+           "g7g3 f2g3 e1f3 g3f2 g2g4" },
+  /* 24 */ { "8/6R1/7p/5K1k/8/6p1/5bPP/8 w - - 0 1", PZ_MATE, 4, "Loyd: the first bullet",
+           "h2g3 f2c5 g7g4 c5e7 g4h4 e7h4 g3g4" },
+  /* 25 */ { "8/6R1/7p/5K1k/8/6p1/5bP1/8 w - - 0 1", PZ_MATE, 5, "Loyd: the second bullet",
+           "g7b7 f2c5 b7b1 c5e7 b1h1 e7h4 h1h2 g3h2 g2g4" },
+  /* 26 */ { "8/8/7p/5K1k/8/6p1/5bPP/4N3 w - - 0 1", PZ_MATE, 6, "Amelung 1900: no rook",
+           "e1f3 f2e1 f3e1 h5h4 h2h3 h4h5 e1d3 h5h4 d3f4 h6h5 f4g6" },
+  /* 27 */ { "3brrb1/2N4B/8/2p4Q/2p2k2/5P2/4P1KR/2N2RB1 w - - 0 1", PZ_MATE, 2, "T. Taverner, 1889",
+           "h2h1 e8e3 g1h2" },
+  /* 28 */ { "6K1/pN2R1PQ/p7/r2k3r/N2n4/1P2p3/BB5p/2Rb2bq w - - 0 1", PZ_MATE, 2, "G. Heathcote, 1905",
+           "c1c7 d4e6 e7d7" },
+  /* 29 */ { "2r5/7p/1P6/1pp5/2p5/2B3QK/1p1N4/k7 w - - 0 1", PZ_MATE, 3, "H. Turton, 1856",
+           "c3h8 b5b4 g3g7 c4c3 g7a7" },
+  /* 30 */ { "3k3K/R2p2R1/p2P4/8/3P4/8/q5b1/8 w - - 0 1", PZ_MATE, 3, "W. Shinkman, 1910",
+           "d4d5 g2d5 g7g8 d5g8 a7a8" },
+  /* 31 */ { "4r1b1/1p4B1/pN2pR2/RB2k3/1P2N2p/2p3b1/n2P1p1r/5K1n w - - 0 1", PZ_MATE, 3, "Loyd 1903: Steinitz Gambit",
+           "f1e2 e8d8 e2e3 a6b5 f6f2" },
+  /* 32 */ { "1r2k1r1/pbppnp1p/1bn2P2/8/Q7/B1PB1q2/P4PPP/3RR1K1 w - - 0 20", PZ_WIN, 0, "The Evergreen Game, 1852",
+           "e1e7 e8d8 e7d7 d8c8 d7d8 c8d8 d3e2 c6d4 e2f3" },
+  /* 33 */ { "1r2k1r1/pbppnp1p/1b3P2/8/Q7/B1PB1q2/P4PPP/3R2K1 w - - 0 21", PZ_MATE, 4, "The Evergreen Game, 1852",
+           "a4d7 e8d7 d3f5 d7e8 f5d7 e8f8 a3e7" },
+  /* 34 */ { "4r1k1/p1pb1ppp/Qbp1r3/8/1P6/2Pq1B2/R2P1PPP/2B2RK1 b - - 4 17", PZ_WIN, 0, "Paulsen - Morphy, 1857",
+           "d3f3 g2f3 e6g6 g1h1 d7h3 a6d3 f7f5 f1d1 h3g2" },
+  /* 35 */ { "r4rk1/1b2bppp/ppq1p3/2ppB2n/5P2/1P1BP3/P1PPQ1PP/R4RK1 w - - 0 15", PZ_WIN, 0, "Lasker - Bauer, 1889",
+           "d3h7 g8h7 e2h5 h7g8 e5g7 g8g7 h5g4 g7h7 f1f3" },
+  /* 36 */ { "rn3rk1/pbppq1pp/1p2pb2/4N2Q/3PN3/3B4/PPP2PPP/R3K2R w KQ - 6 11", PZ_MATE, 7, "Ed. Lasker - Thomas, 1912",
+           "h5h7 g8h7 e4f6 h7h6 e5g4 h6g5 h2h4 g5f4 g2g3 f4f3 e1g1 g7f6 g4h2" },
+  /* 37 */ { "n1rb4/1p3p1p/1p6/1R5K/8/p3p1PN/1PP1R3/N6k w - - 0 1", PZ_MATE, 5, "Loyd 1861: Excelsior",
+           "b2b4 c8c5 b4c5 a3a2 c5c6 d8g5 b5d5 b7c6 d5d1" },
+  /* 38 */ { "8/8/1KP5/3r4/8/8/8/k7 w - - 0 1", PZ_WIN, 0, "Saavedra & Barbier, 1895",
+           "c6c7 d5d6 b6b5 d6d5 b5b4 d5d4 b4b3 d4d3 b3c2 d3d4 c7c8r d4a4 c2b3" },
+  /* 39 */ { "7K/8/k1P5/7p/8/8/8/8 w - - 0 1", PZ_DRAW, 0, "R. Reti, 1921",
+           "h8g7 a6b6 g7f6 h5h4 f6e5 h4h3 e5d6 h3h2 c6c7" },
+  /* 40 */ { "8/6p1/k1P2p1p/7K/8/8/8/8 w - - 0 1", PZ_DRAW, 0, "R. Reti, 1928",
+           "h5g6 a6b6 g6g7 h6h5 g7f6 h5h4 f6e5 h4h3 e5d6" },
+  /* 41 */ { "8/k7/3p4/p2P1p2/P2P1P2/8/8/K7 w - - 0 1", PZ_WIN, 0, "Lasker & Reichhelm, 1901",
+           "a1b1 a7b7 b1c1 b7c7 c1d1 c7d7 d1c2 d7c8 c2d2" },
+  /* 42 */ { "4k3/R7/8/3KP3/5r2/8/8/8 w - - 0 1", PZ_WIN, 0, "A. D. Philidor, 1777",
+           "d5e6 e8f8 a7a8 f8g7 e6d6 f4d4 d6e7 d4b4 e5e6" },
+  /* 43 */ { "8/6K1/8/ppp2k2/8/1P6/1P5P/8 w - - 0 1", PZ_DRAW, 0, "Lasker - Tarrasch, 1914",
+           "h2h4 f5g4 g7g6 g4h4 g6f5 c5c4 b3c4 b5c4 f5e4" },
+  /* 44 */ { "8/8/8/8/pK6/8/5P2/1k6 b - - 0 1", PZ_DRAW, 0, "Yates - Marshall, 1929",
+           "b1b2 b4a4 b2c3 a4a3 c3d4 a3b4 d4e4 b4c5 e4f3" },
+  /* 45 */ { "8/1k3q2/8/8/2p4Q/8/2K4R/5r2 w - - 0 1", PZ_WIN, 0, "H. Rinck, 1950",
+           "h4e4 b7a6 h2h6 f1f6 e4f5 f6h6 f5f7 h6c6 c2c3" },
+  /* 46 */ { "1N6/8/K7/3k4/3p3B/p7/2PP4/8 w - - 0 1", PZ_WIN, 0, "L. Kubbel, 1922",
+           "b8c6 d5c6 h4f6 c6d5 d2d3 a3a2 c2c4 d4c3 f6c3" },
+  /* 47 */ { "8/8/2P5/1Pr5/8/8/N7/k2K4 w - - 0 1", PZ_WIN, 0, "M. Liburkin, 1931",
+           "a2c1 c5d5 d1c2 d5c5 c2d3 c5c1 d3d4 a1a2 d4d5" },
+};
+#define PUZZLE_CNT ((int)(sizeof PUZZLES / sizeof *PUZZLES))
+
+#endif

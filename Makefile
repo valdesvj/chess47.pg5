@@ -107,6 +107,12 @@ xq-test:
 	XQ_ENGINE=$(XQ_ENGINE) $(PYTHON) test/xq_check.py 120
 .PHONY: xq-test
 
+# Puzzles 47 (src/puzzles.h) proven with python-chess and Stockfish: each mate exact with its one key, each study's
+# first move the only one that keeps the result (a few minutes); test/test_puzzles.py plays them in the simulator
+puzzle-test:
+	$(PYTHON) tools/puzzles_check.py
+.PHONY: puzzle-test
+
 # both .pg5 at once: build/<NAME>.pg5 (DMCP5 3.58's console) and build/tinyusb/<NAME>.pg5 (any DMCP5)
 both:
 	$(MAKE) USB=sercon

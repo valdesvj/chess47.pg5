@@ -42,8 +42,14 @@ xq = {'size': z, 'sizeN': nn, 'pieces': pieces_of('XQ_PIECE', z), 'piecesN': pie
       'river': [[rv[k * 30 + 2 * y] << 8 | rv[k * 30 + 2 * y + 1] for y in range(15)] for k in range(4)],
       'seven': [[sv[k * 30 + 2 * y] << 8 | sv[k * 30 + 2 * y + 1] for y in range(15)] for k in range(4)]}
 
+# src/puzzles.h: Puzzles 47
+pzs = [{'fen': f, 'kind': k, 'n': int(n), 'title': t, 'line': l} for f, k, n, t, l in
+       re.findall(r'\{\s*"([^"]+)",\s*PZ_(\w+),\s*(\d+),\s*"([^"]*)",\s*"([^"]*)"\s*\}', rd('src/puzzles.h'))]
+assert len(pzs) == 47, 'puzzles.h'
+
 bmp = ('window.CHESS47_BMP = ' + json.dumps({'pieces': pieces, 'crazy': crazy, 'letters': letters}) + ';\n' +
-       'window.XQ_BMP = ' + json.dumps(xq, separators=(',', ':')) + ';')
+       'window.XQ_BMP = ' + json.dumps(xq, separators=(',', ':')) + ';\n' +
+       'window.PUZZLES47 = ' + json.dumps(pzs) + ';')
 html = rd('web/app.html').replace('/*ENGINE*/', rd('web/engine.js') + '\n' + rd('web/xq_engine.js'))
 html = html.replace('/*PIECES*/', bmp).replace('/*APP*/', rd('web/app.js'))
 open(os.path.join(ROOT, 'web', 'chess47.html'), 'w', encoding='utf-8').write(html)

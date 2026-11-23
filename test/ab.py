@@ -21,10 +21,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
 class Uci:
-    def __init__(self, cmd, env):
+    def __init__(self, cmd, env, level=None):
         self.p = subprocess.Popen([cmd, '-q'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
                                   env=env)
         self.send('uci'); self.until('uciok')
+        if level is not None:
+            self.send('setoption name Level value %d' % level)
 
     def send(self, s):
         self.p.stdin.write(s + '\n'); self.p.stdin.flush()
@@ -127,7 +129,7 @@ def result_xq(moves, eng, go):
 def pair(a, k):
     """two games from opening k: NEW's points"""
     env = dict(os.environ, C47_HASH_KB=str(a.hash))
-    new, old = Uci(a.new, env), Uci(a.old, env)
+    new, old = Uci(a.new, env, a.level), Uci(a.old, env, a.level)
     go = 'go movetime %d' % a.movetime if a.movetime else 'go nodes %d' % a.nodes
     mv = opening(a.xq, a.seed * 100000 + k, a.plies)
     pts = []
@@ -159,6 +161,7 @@ def main():
     ap.add_argument('--hash', type=int, default=1024, help='KB of hash table (the calculator: 1024)')
     ap.add_argument('--jobs', type=int, default=max(1, (os.cpu_count() or 2) - 2))
     ap.add_argument('--seed', type=int, default=47)
+    ap.add_argument('--level', type=int, default=None, help='both engines at this level (1-9: its depth and noise)')
     a = ap.parse_args()
     a.plies = a.plies or (6 if a.xq else 8)
     pts = []
@@ -176,7 +179,7 @@ def main():
     los = 0.5 * (1 + math.erf((w - l) / math.sqrt(2 * (w + l)))) if w + l else 0.5
     print('%s %s vs %s, %s: +%d =%d -%d  %.1f%%  Elo %+.0f (95%%: %+.0f .. %+.0f)  LOS %.0f%%' % (
         'xiangqi' if a.xq else 'chess', a.new, a.old,
-        'movetime %d' % a.movetime if a.movetime else 'nodes %d' % a.nodes,
+        ('level %d, ' % a.level if a.level is not None else '') + ('movetime %d' % a.movetime if a.movetime else 'nodes %d' % a.nodes),
         w, d, l, 100 * s, elo(s), elo(s - m), elo(s + m), 100 * los), flush=True)
 
 

@@ -15,6 +15,15 @@
 #include "xq_engine.h"
 #include <string.h>
 
+/* the evaluation network, when tools/nnue/train.py has made one (NO_NNUE: the hand-written evaluation) */
+#if !defined(NO_NNUE) && __has_include("nnue_xq.h")
+#include "nnue_xq.h"
+#define HAVE_NNUE 1
+static int16_t (*nn_acc)[2][NNX_HID];        /* [MAXPLY + 2] the accumulators of the search's plies */
+static uint64_t *nn_key;                     /* [MAXPLY + 2] the position each belongs to */
+#endif
+static int eval_hand;                        /* this search uses the hand-written evaluation (Limits.hand_eval) */
+
 typedef XPos Pos;                          /* for src/search.inc */
 
 typedef struct { uint64_t key; Move move; int16_t score; int8_t depth; uint8_t flag; } TTE;   /* as chess's */
@@ -63,6 +72,11 @@ int xq_init(void *(*alloc)(size_t)) {
     zp = alloc(14 * 90 * sizeof(uint64_t));
     stk = alloc((MAXPLY + 2) * sizeof(Pos));
     if (!zp || !stk) return 0;
+#ifdef HAVE_NNUE
+    nn_acc = alloc((MAXPLY + 2) * sizeof *nn_acc);
+    nn_key = alloc((MAXPLY + 2) * sizeof(uint64_t));
+    if (!nn_acc || !nn_key) return 0;
+#endif
     for (int i = 0; i < 14 * 90; i++) zp[i] = rnd64();
     zside = rnd64();
   }
@@ -389,7 +403,8 @@ static int pst(int ty, int rr, int f) {
 #define XE_CCN 25        /* a cannon on the general's file with one screen (it pins, threatens) */
 #endif
 
-int xq_evaluate(const Pos *p) {
+/* the hand-written evaluation (without a network, or NO_NNUE) */
+__attribute__((unused)) static int hce_evaluate(const Pos *p) {
   const uint8_t *b = p->b;
   int sc[2] = { 0, 0 }, guard[2] = { 0, 0 }, units[2] = { 0, 0 }, maj = 0, ch[2] = { 0, 0 };
   int gf[2] = { XFILE(p->ksq[0]), XFILE(p->ksq[1]) }, gr[2] = { XRANK(p->ksq[0]), XRANK(p->ksq[1]) };
@@ -460,6 +475,79 @@ int xq_evaluate(const Pos *p) {
   int v = sc[0] - sc[1];
   return (p->side == XRED ? v : -v) + 10;
 }
+
+/* ------------------------------------------------------------------ */
+/*  The evaluation network (src/nnue_xq.h): as chess's (src/engine.c)  */
+/* ------------------------------------------------------------------ */
+/* Each side's view: 14 x 90 inputs (its own pieces first, the board turned over for Black), NNX_HID kept up to date
+   in the search by the points that changed between the boards, clipped to 0..QA, then one output. */
+#ifdef HAVE_NNUE
+static inline int nn_feat(int pc, int sq, int view) {
+  int col = XCOLOR(pc), r = XRANK(sq);
+  if (view) { col ^= 1; r = 9 - r; }
+  return ((col * 7 + XTYPE(pc) - 1) * 90 + r * 9 + XFILE(sq)) * NNX_HID;
+}
+static void nn_refresh(const Pos *p, int16_t a[2][NNX_HID]) {
+  for (int v = 0; v < 2; v++) {
+    memcpy(a[v], NNX_B1, sizeof NNX_B1);
+    for (int r = 0; r < 10; r++)
+      for (int f = 0; f < 9; f++) {
+        int s = XSQ(f, r);
+        if (!p->b[s]) continue;
+        const int16_t *w = NNX_W1 + nn_feat(p->b[s], s, v);
+        for (int i = 0; i < NNX_HID; i++) a[v][i] += w[i];
+      }
+  }
+}
+static void nn_update(const Pos *o, const Pos *n, int16_t src[2][NNX_HID], int16_t dst[2][NNX_HID]) {
+  memcpy(dst, src, 2 * NNX_HID * sizeof(int16_t));
+  const uint32_t *wo = (const uint32_t *)o->b, *wn = (const uint32_t *)n->b;
+  for (int k = 0; k < 64; k++) {
+    if (wo[k] == wn[k]) continue;
+    for (int s = 4 * k; s < 4 * k + 4; s++) {
+      int a = o->b[s], b = n->b[s];
+      if (a == b) continue;
+      for (int v = 0; v < 2; v++) {
+        if (a) { const int16_t *w = NNX_W1 + nn_feat(a, s, v); for (int i = 0; i < NNX_HID; i++) dst[v][i] -= w[i]; }
+        if (b) { const int16_t *w = NNX_W1 + nn_feat(b, s, v); for (int i = 0; i < NNX_HID; i++) dst[v][i] += w[i]; }
+      }
+    }
+  }
+}
+static int nn_output(const int16_t a[2][NNX_HID], int side) {
+  int32_t out = NNX_B2;
+  const int16_t *us = a[side], *them = a[side ^ 1];
+  for (int i = 0; i < NNX_HID; i++) {
+    int x = us[i] < 0 ? 0 : us[i] > NNX_QA ? NNX_QA : us[i];
+    int y = them[i] < 0 ? 0 : them[i] > NNX_QA ? NNX_QA : them[i];
+    out += x * NNX_W2[i] + y * NNX_W2[NNX_HID + i];
+  }
+  return (int)((int64_t)out * NNX_SCALE / (NNX_QA * NNX_QB));
+}
+int xq_evaluate(const Pos *p) {
+  if (eval_hand) return hce_evaluate(p);                     /* levels 1-3 */
+  uintptr_t d = (uintptr_t)p - (uintptr_t)stk;                /* unsigned: a position elsewhere is far out */
+  int ply = (int)(d / sizeof(Pos));
+  if (!stk || d >= (MAXPLY + 2) * sizeof(Pos) || d % sizeof(Pos)) {   /* outside the search: from the board */
+    int16_t a[2][NNX_HID];
+    nn_refresh(p, a);
+    return nn_output(a, p->side);
+  }
+  if (nn_key[ply] != p->key) {
+    int k = ply - 1;
+    while (k >= 0 && nn_key[k] != stk[k].key) k--;
+    if (k < 0) { nn_refresh(&stk[0], nn_acc[0]); nn_key[0] = stk[0].key; k = 0; }
+    for (; k < ply; k++) { nn_update(&stk[k], &stk[k + 1], nn_acc[k], nn_acc[k + 1]); nn_key[k + 1] = stk[k + 1].key; }
+  }
+#ifdef NN_CHECK
+  { int16_t t[2][NNX_HID]; nn_refresh(p, t);
+    if (memcmp(t, nn_acc[ply], sizeof t)) { extern void xq_nn_check_failed(void); xq_nn_check_failed(); } }
+#endif
+  return nn_output(nn_acc[ply], p->side);
+}
+#else
+int xq_evaluate(const Pos *p) { return hce_evaluate(p); }
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  Search: src/search.inc with Xiangqi's hooks                       */

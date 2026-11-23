@@ -82,7 +82,7 @@ static void go(const char *l) {
   else if (tl) { lim.time_ms = tl / 25 + inc * 3 / 4; if (lim.time_ms > tl / 3) lim.time_ms = tl / 3; }
   if (d) lim.depth = (int)d;
   if (nodes) lim.max_nodes = nodes;
-  if (level >= 1 && level <= 9) { if (LV[level].depth < lim.depth) lim.depth = LV[level].depth; lim.noise = LV[level].noise; }
+  if (level >= 1 && level <= 9) { if (LV[level].depth < lim.depth) lim.depth = LV[level].depth; lim.noise = LV[level].noise; lim.hand_eval = level <= 3; }
   Move best;
   if (level == 0) { Move ml[MAXMOVES]; int n = xq_gen_legal(p, ml); best = n ? ml[rand() % n] : 0; }
   else best = xq_search(p, keys, nh + 1, &lim).best;

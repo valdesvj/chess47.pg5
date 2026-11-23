@@ -350,8 +350,9 @@ static void xq_info_cb(int depth, int score, uint32_t nodes, Move best) {
   lcd_show();
 }
 
-static Result xq_run_search(int depth, uint32_t ms, int noise) {
+static Result xq_run_search(int depth, uint32_t ms, int noise, int hand) {
   Limits lim;
+  lim.hand_eval = hand;
   lim.depth = depth; lim.time_ms = ms; lim.noise = noise; lim.seed = rnd(); lim.max_nodes = 0;
   lim.now = now_ms; lim.poll = poll_cb; lim.info = xq_info_cb;
   thinking = 1;
@@ -424,7 +425,7 @@ static void xq_cpu_move(void) {
   }
   if (cfg.level == 0) { m = XG->legal[rnd() % (uint32_t)XG->nlegal]; sys_delay(250); }
   else {
-    Result r = xq_run_search(L->depth, think_time(L->ms), L->noise);
+    Result r = xq_run_search(L->depth, think_time(L->ms), L->noise, L->hand);
     m = r.best ? r.best : XG->legal[0];
     xcpu_score = r.score;
   }
@@ -433,7 +434,7 @@ static void xq_cpu_move(void) {
 
 static void xq_hint(void) {
   if (XG->over || !XG->nlegal) return;
-  Result r = xq_run_search(40, 1500, 0);
+  Result r = xq_run_search(40, 1500, 0, 0);
   char w[10];
   xq_move_to_wxf(&XG->cur, r.best, w);
   xhint_from = XFROM(r.best); xhint_to = XTO(r.best);

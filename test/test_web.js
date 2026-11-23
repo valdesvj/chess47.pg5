@@ -4,6 +4,7 @@
 'use strict';
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
+require('./nnue_js.js');                               // the evaluation networks, if made
 const E = require(path.join(ROOT, 'web', 'engine.js'));
 const input = fs.readFileSync(path.join(__dirname, 'web_positions.txt'), 'utf8');
 const want = execFileSync(path.join(ROOT, 'build', 'jscheck'), { input }).toString().trim().split('\n');
@@ -12,13 +13,13 @@ const hex = x => (x >>> 0).toString(16).padStart(8, '0');
 let fails = 0, i = 0;
 const t = Date.now();
 for (const line of input.trim().split('\n')) {
-  const [fen, d, pd, nz] = line.split('|');
+  const [fen, d, pd, nz, he] = line.split('|');
   const p = E.newPos();
   E.chess960 = 0;
   if (!E.pos_from_fen(p, fen)) { console.log('BADFEN', fen); fails++; i++; continue; }
   const pf = E.perft(p, +pd);
   E.eng_clear_tt();
-  const r = E.search(p, [[p.hi, p.lo]], nz ? { depth: +d, noise: +nz, seed: 12345 } : { depth: +d });
+  const r = E.search(p, [[p.hi, p.lo]], nz ? { depth: +d, noise: +nz, seed: 12345, hand_eval: +(he || 0) } : { depth: +d });
   const got = [pf, E.move_to_str(p, r.best), E.move_to_san(p, r.best), r.score, r.depth, r.nodes,
                hex(p.hi) + hex(p.lo), E.pos_to_fen(p)].join(' ');
   const ok = got === want[i];

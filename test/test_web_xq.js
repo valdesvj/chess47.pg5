@@ -5,6 +5,7 @@
 'use strict';
 const path = require('path'), { execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
+require('./nnue_js.js');                               // the evaluation networks, if made
 const X = require(path.join(ROOT, 'web', 'xq_engine.js'));
 X.xq_init(1 << 20);
 let seed = 1234567;
@@ -26,7 +27,7 @@ for (let g = 0; g < 24; g++) {
     X.xq_make_move(p, q, ml[rnd(n)]); X.copyPos(p, q);
   }
   if (!X.xq_gen_legal(p, ml)) continue;
-  lines.push(X.xq_to_fen(p) + '|' + (4 + g % 3) + '|3' + (g % 5 === 0 ? '|25' : ''));
+  lines.push(X.xq_to_fen(p) + '|' + (4 + g % 3) + '|3' + (g % 5 === 0 ? (g % 10 === 0 ? '|25|1' : '|25') : ''));
 }
 const input = lines.join('\n') + '\n';
 const want = execFileSync(path.join(ROOT, 'build', 'xq_jscheck'), { input }).toString().trim().split('\n');
@@ -34,12 +35,12 @@ const hex = x => (x >>> 0).toString(16).padStart(8, '0');
 let fails = 0;
 const t = Date.now();
 lines.forEach((line, i) => {
-  const [fen, d, pd, nz] = line.split('|');
+  const [fen, d, pd, nz, he] = line.split('|');
   const p = X.newPos();
   if (!X.xq_from_fen(p, fen)) { console.log('BADFEN', fen); fails++; return; }
   const pf = X.xq_perft(p, +pd);
   X.xq_clear_tt();
-  const r = X.xq_search(p, [[p.hi, p.lo]], nz ? { depth: +d, noise: +nz, seed: 12345 } : { depth: +d });
+  const r = X.xq_search(p, [[p.hi, p.lo]], nz ? { depth: +d, noise: +nz, seed: 12345, hand_eval: +(he || 0) } : { depth: +d });
   const got = [pf, X.xq_move_to_str(r.best, 0), X.xq_move_to_wxf(p, r.best), r.score, r.depth, r.nodes,
                hex(p.hi) + hex(p.lo), X.xq_to_fen(p)].join(' ');
   const ok = got === want[i];

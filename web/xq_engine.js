@@ -351,7 +351,7 @@ function attack(p, by) {
   return Math.trunc(units * units * XE_ATT / 4);
 }
 
-function xq_evaluate(p) {
+function hce_evaluate(p) {
   const b = p.b, sc = [0, 0], guard = [0, 0];
   for (let r = 0; r < 10; r++)
     for (let f = 0; f < 9; f++) {
@@ -418,6 +418,79 @@ function xq_evaluate(p) {
   sc[1] += Math.trunc(attack(p, XBLACK) * (8 - guard[0]) / 6);
   const v = sc[0] - sc[1];
   return (p.side === XRED ? v : -v) + 10;
+}
+
+/* ---- the evaluation network (src/nnue_xq.h, tools/nnue/train.py): as the C, number for number ----
+   The weights come from xq (the page: base64 by tools/build_web.py; the tests: from the header). Each ply of
+   the search keeps its accumulators with the key of the position they belong to; a position's come from the nearest
+   ply below whose are current, by the squares that changed between the boards. */
+const NN = (() => {
+  const src = G.NNUE47 && G.NNUE47.xq;
+  if (!src) return null;
+  const dec = x => typeof x !== 'string' ? Int16Array.from(x) : (() => {
+    const s = typeof atob === 'function' ? atob(x) : Buffer.from(x, 'base64').toString('binary');
+    const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    return new Int16Array(u.buffer);
+  })();
+  return { hid: src.hid, qa: src.qa, qb: src.qb, scale: src.scale, w1: dec(src.w1), b1: dec(src.b1), w2: dec(src.w2), b2: src.b2 };
+})();
+let eval_hand = 0;                                           /* this search: the hand-written evaluation */
+const nn_acc = NN ? Array.from({ length: MAXPLY + 2 }, () => [new Int16Array(NN.hid), new Int16Array(NN.hid)]) : null;
+const nn_kH = new Int32Array(MAXPLY + 2), nn_kL = new Int32Array(MAXPLY + 2), nn_ok = new Uint8Array(MAXPLY + 2);
+for (let i = 0; i < MAXPLY + 2; i++) stk[i].ply = i;
+function nn_feat(pc, sq, view) {
+  let col = XCOLOR(pc), r = XRANK(sq);
+  if (view) { col ^= 1; r = 9 - r; }
+  return ((col * 7 + XTYPE(pc) - 1) * 90 + r * 9 + XFILE(sq)) * NN.hid;
+}
+function nn_refresh(p, a) {
+  const H = NN.hid;
+  for (let v = 0; v < 2; v++) {
+    a[v].set(NN.b1);
+    for (let s = 0; s < 256; s++) {
+      if (!p.b[s] || (p.b[s] & 0x80)) continue;            /* empty, or off the board (Xiangqi) */
+      const o = nn_feat(p.b[s], s, v), av = a[v];
+      for (let i = 0; i < H; i++) av[i] += NN.w1[o + i];
+    }
+  }
+}
+function nn_update(o, n, src, dst) {
+  const H = NN.hid;
+  dst[0].set(src[0]); dst[1].set(src[1]);
+  for (let s = 0; s < 256; s++) {
+    const a = o.b[s], b = n.b[s];
+    if (a === b) continue;
+    for (let v = 0; v < 2; v++) {
+      const dv = dst[v];
+      if (a) { const f = nn_feat(a, s, v); for (let i = 0; i < H; i++) dv[i] -= NN.w1[f + i]; }
+      if (b) { const f = nn_feat(b, s, v); for (let i = 0; i < H; i++) dv[i] += NN.w1[f + i]; }
+    }
+  }
+}
+function nn_output(a, side) {
+  const H = NN.hid, us = a[side], them = a[side ^ 1], qa = NN.qa, w2 = NN.w2;
+  let out = NN.b2;
+  for (let i = 0; i < H; i++) {
+    const x = us[i] < 0 ? 0 : us[i] > qa ? qa : us[i], y = them[i] < 0 ? 0 : them[i] > qa ? qa : them[i];
+    out += x * w2[i] + y * w2[H + i];
+  }
+  return Math.trunc(out * NN.scale / (NN.qa * NN.qb));
+}
+const nn_tmp = NN ? [new Int16Array(NN.hid), new Int16Array(NN.hid)] : null;
+function xq_evaluate(p) {
+  if (!NN || eval_hand) return hce_evaluate(p);               /* eval_hand: levels 1-3 */
+  const ply = p.ply;
+  if (ply === undefined || stk[ply] !== p) { nn_refresh(p, nn_tmp); return nn_output(nn_tmp, p.side); }
+  if (!nn_ok[ply] || nn_kH[ply] !== p.hi || nn_kL[ply] !== p.lo) {
+    let k = ply - 1;
+    while (k >= 0 && (!nn_ok[k] || nn_kH[k] !== stk[k].hi || nn_kL[k] !== stk[k].lo)) k--;
+    if (k < 0) { nn_refresh(stk[0], nn_acc[0]); nn_kH[0] = stk[0].hi; nn_kL[0] = stk[0].lo; nn_ok[0] = 1; k = 0; }
+    for (; k < ply; k++) {
+      nn_update(stk[k], stk[k + 1], nn_acc[k], nn_acc[k + 1]);
+      nn_kH[k + 1] = stk[k + 1].hi; nn_kL[k + 1] = stk[k + 1].lo; nn_ok[k + 1] = 1;
+    }
+  }
+  return nn_output(nn_acc[ply], p.side);
 }
 
 /* ---- the search: src/search.inc with Xiangqi's hooks ---- */
@@ -670,11 +743,11 @@ function xq_search_pv(root, first, max) {
   return pv;
 }
 
-/* lim: { depth, time_ms, noise, seed, max_nodes, now(), poll(), info(depth, score, nodes, best) };
+/* lim: { depth, time_ms, noise, seed, max_nodes, hand_eval, now(), poll(), info(depth, score, nodes, best) };
    keys: [hi, lo] pairs of the game so far */
 function xq_search(root, keys, lim) {
   const R = { best: 0, score: 0, depth: 0, nodes: 0 };
-  L = lim; stop = 0; nodes = 0; pv_age = (pv_age + 1) & 255;
+  L = lim; eval_hand = lim.hand_eval ? 1 : 0; stop = 0; nodes = 0; pv_age = (pv_age + 1) & 255;
   t0 = lim.now ? lim.now() : 0;
   const n = xq_gen_legal(root, scratch);
   if (!n) return R;

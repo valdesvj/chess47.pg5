@@ -1,5 +1,5 @@
 /* xq_jscheck.c - the C Xiangqi engine's answers for web/xq_engine.js (test/test_web_xq.js compares them): for each
- * line of stdin "FEN|search depth|perft depth[|noise]": the perft count and a fixed-depth search (no time, the hash
+ * line of stdin "FEN|search depth|perft depth[|noise[|hand]]": the perft count and a fixed-depth search (no time, the hash
  * table cleared, eng_init's 16 MB: the web engine's 2^20 entries): best move, WXF, score, depth, nodes, the key, the
  * FEN. GPL-3.0-or-later. */
 #include <stdio.h>
@@ -21,7 +21,9 @@ int main(void) {
     unsigned long long pf = xq_perft(&p, atoi(b));
     eng_clear_tt();
     Limits lim; memset(&lim, 0, sizeof lim); lim.depth = atoi(a);
+    char *he = nz ? strchr(nz, '|') : 0; if (he) *he++ = 0;      /* optional: 1 = the hand-written evaluation */
     if (nz) { lim.noise = atoi(nz); lim.seed = 12345; }
+    if (he) lim.hand_eval = atoi(he);
     uint64_t k = p.key;
     Result r = xq_search(&p, &k, 1, &lim);
     char m[12], w[12], fen[128];

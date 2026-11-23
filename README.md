@@ -16,6 +16,27 @@ This is the native C sister of the RPN `chess47` program for the C47.
 *A 15+10 game against level 4; level 9 thinking (its expected line, the counts, its move marked); Chess960 with the
 clock OFF (each side's time used); the CRAZY level.*
 
+### New in v1.5: neural-network evaluation (NNUE), chess and Xiangqi
+
+Both games now judge positions with a small neural network instead of the hand-written evaluation: the pieces on
+the board, as seen by each side, feed 128 hidden values per side, which are kept up to date move by move during the
+search (an "efficiently updatable" network). The weights are int16 constants in flash: 196 KB for chess
+(`src/nnue_chess.h`), 323 KB for Xiangqi (`src/nnue_xq.h`).
+
+They were trained on the PC (`tools/nnue/`, PyTorch on the GPU) from Chess 47's own games, about 8.5 million chess
+positions and 9.5 million Xiangqi positions, each scored by Stockfish or Pikafish at depth 8 and by the game's
+result. The training data comes from engine self-play only.
+
+Against the hand-written evaluation (400 games each, `test/ab.py`):
+
+| | equal nodes (25k) | equal time (20 ms a move) |
+|---|---|---|
+| Chess | **+134 Elo** (95%: +101 .. +169) | **+165 Elo** (+131 .. +202) |
+| Xiangqi | **+453 Elo** (+399 .. +526) | **+467 Elo** (+411 .. +545) |
+
+Levels 1–3 would also have become 120–330 Elo stronger, so they keep the hand-written evaluation and play as in
+v1.4. The web version has the same networks, node for node (the page grows to 880 KB).
+
 ### New in v1.4: stronger engines (chess and Xiangqi)
 
 The search that both games share was improved. Each change was kept only if it won in A/B matches of hundreds of
@@ -541,8 +562,8 @@ GAMES=20 test/run_matches.sh
 | Board | 0x88, copy-make, Zobrist hashing |
 | Moves | fully legal, en passant, promotions, **Chess960 castling** (X-FEN/Shredder-FEN), perft-verified |
 | Search | iterative deepening, PVS alpha-beta, transposition table, null move, LMR, check extension, killers + history, quiescence with delta pruning, repetition/50-move detection |
-| Eval | material + piece-square tables (tapered), mobility, pawn structure (passed/doubled/isolated), rooks on open files, bishop pair, development, king pawn shield |
-| Memory | 2.4 KB of the 8 KB static RAM. Everything else (≈85 KB engine + hash table sized from free heap + 70 KB game history) is on the heap |
+| Eval | NNUE: (12 × 64 inputs → 128) × 2 sides → 1, int16, updated incrementally (Xiangqi: 14 × 90 inputs). Levels 1–3: material + piece-square tables (tapered), mobility, pawn structure, rooks on open files, bishop pair, development, king pawn shield |
+| Memory | 4.1 KB of the 8 KB static RAM. Everything else (engine tables, hash table sized from free heap, 33 KB of network accumulators per game, game history) is on the heap; the network weights stay in flash |
 | Speed | about 5,000 instructions per node, so an estimated ~10k nodes/s on battery (80 MHz) and ~19k nodes/s on USB power (160 MHz) |
 
 Files: `src/engine.c` (portable engine), `src/main.c` (DMCP5 UI), `src/pieces.h` (bitmaps),

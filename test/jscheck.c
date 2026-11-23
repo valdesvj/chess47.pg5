@@ -1,5 +1,5 @@
 /* jscheck.c - the C engine's answers for web/engine.js (test/test_web.js compares them): for each line of
- * stdin "FEN|search depth|perft depth[|noise]": the perft count and a fixed-depth search (no time, no noise, the hash
+ * stdin "FEN|search depth|perft depth[|noise[|hand]]": the perft count and a fixed-depth search (no time, no noise, the hash
  * table cleared, 16 MB: the web engine's 2^20 entries): best move, score, depth, nodes. GPL-3.0-or-later. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +19,9 @@ int main(void) {
     unsigned long long pf = perft(&p, atoi(b));
     eng_clear_tt();
     Limits lim; memset(&lim, 0, sizeof lim); lim.depth = atoi(a);
+    char *he = nz ? strchr(nz, '|') : 0; if (he) *he++ = 0;      /* optional: 1 = the hand-written evaluation */
     if (nz) { lim.noise = atoi(nz); lim.seed = 12345; }
+    if (he) lim.hand_eval = atoi(he);
     uint64_t k = p.key;
     Result r = search(&p, &k, 1, &lim);
     char m[8]; move_to_str(&p, r.best, m);

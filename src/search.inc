@@ -332,6 +332,7 @@ Result SEARCH_NAME(const Pos *root, const uint64_t *keys, int nkeys, const Limit
   Result R;
   memset(&R, 0, sizeof R);
   L = lim;
+  eval_hand = lim->hand_eval;
   stop = 0;
   nodes = 0;
   pv_age++;

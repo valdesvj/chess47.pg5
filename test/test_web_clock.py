@@ -34,7 +34,9 @@ def main():
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     url = 'http://127.0.0.1:%d/chess47.html' % httpd.server_address[1]
     with sync_playwright() as pw:
-        b = pw.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+        chrome = next((c for c in ('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium')
+                       if os.path.exists(c)), None)
+        b = pw.chromium.launch(executable_path=chrome, args=['--no-sandbox'])
         ctx = b.new_context(viewport={'width': 1100, 'height': 900})
         page = ctx.new_page()
         page.clock.install()

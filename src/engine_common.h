@@ -28,6 +28,7 @@ typedef struct {
   uint32_t (*now)(void);          /* milliseconds clock */
   int      (*poll)(void);         /* return 1 to stop the search now */
   void     (*info)(int depth, int score, uint32_t nodes, Move best);
+  int      hand_eval;             /* 1 = the hand-written evaluation, not the network (levels 1-3) */
 } Limits;
 
 typedef struct {

@@ -71,10 +71,10 @@ typedef struct {
 } Cfg;
 static Cfg cfg = { 4, MODE_HC, WHITE, 0, 0, 1, 0, 0 };
 
-typedef struct { const char *name; int depth; uint32_t ms; int noise; } Level;
+typedef struct { const char *name; int depth; uint32_t ms; int noise; int hand; } Level;   /* hand: hand-written eval */
 static const Level LEVELS[10] = {
   { "CRAZY", 0, 0, 0 },
-  { "1",  1,     0, 150 }, { "2",  2,     0, 80 }, { "3",  3,     0, 40 },
+  { "1",  1,     0, 150, 1 }, { "2",  2,     0, 80, 1 }, { "3",  3,     0, 40, 1 },
   { "4",  5,   500,   6 }, { "5", 40,  1000,  2 }, { "6", 40,  2500,  0 },
   { "7", 40,  5000,   0 }, { "8", 40, 10000,  0 }, { "9", 40, 30000,  0 },
 };
@@ -842,8 +842,9 @@ static uint32_t think_time(uint32_t level_ms) {
   return (uint32_t)t;
 }
 
-static Result run_search(int depth, uint32_t ms, int noise) {
+static Result run_search(int depth, uint32_t ms, int noise, int hand) {
   Limits lim;
+  lim.hand_eval = hand;
   lim.depth = depth;
   lim.time_ms = ms;
   lim.noise = noise;
@@ -935,7 +936,7 @@ static void cpu_move(void) {
     uint32_t ms = think_time(L->ms);
     int depth = L->depth;
     if (TC && !L->ms) depth = L->depth;     /* fixed-depth levels stay weak */
-    Result r = run_search(depth, ms, L->noise);
+    Result r = run_search(depth, ms, L->noise, L->hand);
     m = r.best ? r.best : G->legal[0];
     cpu_score = r.score; cpu_scored = 1;
   }
@@ -946,7 +947,7 @@ static void cpu_move(void) {
 static void hint(void) {
   if (G->over || !G->nlegal) return;
   if (VS_USB) { strcpy(status, "No hints vs USB"); return; }   /* the opponent may be a person online */
-  Result r = run_search(40, 1500, 0);
+  Result r = run_search(40, 1500, 0, 0);
   hint_from = MFROM(r.best);
   hint_to = (MFLAGS(r.best) & F_CASTLE) ? castle_rook_sq(CUR, r.best) : MTO(r.best);
   char san[10];
@@ -1572,9 +1573,9 @@ static void program_init(void) {
 
   G = malloc(sizeof(Game));
   if (!G) fatal("Not enough memory for game");
-  /* give the hash table what is left, keeping a reserve for the system */
+  /* give the hash table what is left, keeping a reserve for the system and the two games' NNUE accumulators */
   int largest = sys_largest_free_mem();
-  int tt = largest - 160 * 1024;
+  int tt = largest - (160 + 72) * 1024;
   if (tt > 1024 * 1024) tt = 1024 * 1024;
   if (tt < 32 * 1024) tt = 32 * 1024;
   if (!eng_init(heap_alloc, (size_t)tt)) fatal("Not enough memory for engine");

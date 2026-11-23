@@ -50,7 +50,22 @@ assert len(pzs) == 47, 'puzzles.h'
 bmp = ('window.CHESS47_BMP = ' + json.dumps({'pieces': pieces, 'crazy': crazy, 'letters': letters}) + ';\n' +
        'window.XQ_BMP = ' + json.dumps(xq, separators=(',', ':')) + ';\n' +
        'window.PUZZLES47 = ' + json.dumps(pzs) + ';')
-html = rd('web/app.html').replace('/*ENGINE*/', rd('web/engine.js') + '\n' + rd('web/xq_engine.js'))
+# the evaluation networks (src/nnue_chess.h, src/nnue_xq.h, tools/nnue/train.py), if made: the int16 weights in
+# base64 (little-endian, as Int16Array reads them), before the engines that take them
+import array, base64
+def nnue(file, G):
+    p = os.path.join(ROOT, 'src', file)
+    if not os.path.exists(p):
+        return None
+    h = rd('src/' + file)
+    num = lambda k: int(re.search(r'#define %s_%s (\d+)' % (G, k), h).group(1))
+    vals = lambda k: [int(v) for v in re.search(r'%s_%s\[[^]]*\] = \{([^}]*)\}' % (G, k), h, re.S).group(1).split(',')]
+    b64 = lambda k: base64.b64encode(array.array('h', vals(k)).tobytes()).decode()
+    return {'hid': num('HID'), 'qa': num('QA'), 'qb': num('QB'), 'scale': num('SCALE'), 'w1': b64('W1'), 'b1': b64('B1'),
+            'w2': b64('W2'), 'b2': int(re.search(r'%s_B2 = (-?\d+)' % G, h).group(1))}
+nets = 'self.NNUE47 = ' + json.dumps({'chess': nnue('nnue_chess.h', 'NNC'), 'xq': nnue('nnue_xq.h', 'NNX')},
+                                     separators=(',', ':')) + ';\n'
+html = rd('web/app.html').replace('/*ENGINE*/', nets + rd('web/engine.js') + '\n' + rd('web/xq_engine.js'))
 html = html.replace('/*PIECES*/', bmp).replace('/*APP*/', rd('web/app.js'))
 open(os.path.join(ROOT, 'web', 'chess47.html'), 'w', encoding='utf-8').write(html)
 print('web/chess47.html', len(html), 'bytes')

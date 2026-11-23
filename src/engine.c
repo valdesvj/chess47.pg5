@@ -9,6 +9,15 @@
 #include "engine.h"
 #include <string.h>
 
+/* the evaluation network, when tools/nnue/train.py has made one (NO_NNUE: the hand-written evaluation) */
+#if !defined(NO_NNUE) && __has_include("nnue_chess.h")
+#include "nnue_chess.h"
+#define HAVE_NNUE 1
+static int16_t (*nn_acc)[2][NNC_HID];        /* [MAXPLY + 2] the accumulators of the search's plies */
+static uint64_t *nn_key;                     /* [MAXPLY + 2] the position each belongs to */
+#endif
+static int eval_hand;                        /* this search uses the hand-written evaluation (Limits.hand_eval) */
+
 uint8_t c_rfile[2] = { 7, 0 };
 int     chess960   = 0;
 
@@ -57,6 +66,11 @@ int eng_init(void *(*alloc)(size_t), size_t tt_bytes) {
   rep     = alloc((MAXGAME + MAXPLY + 8) * sizeof(uint64_t));
   scratch = alloc(MAXMOVES * sizeof(Move));
   pvh     = alloc(PVH_N * sizeof(PVE));
+#ifdef HAVE_NNUE
+  nn_acc  = alloc((MAXPLY + 2) * sizeof *nn_acc);
+  nn_key  = alloc((MAXPLY + 2) * sizeof(uint64_t));
+  if (!nn_acc || !nn_key) return 0;
+#endif
   if (!zp || !stk || !mbuf || !sbuf || !killer || !hh || !rep || !scratch || !pvh) return 0;
 
   tt_n = 1;
@@ -616,7 +630,8 @@ static const int8_t PASS_MG[8] = { 0, 5, 10, 15, 25, 40, 60, 0 };
 static const uint8_t PASS_EG[8] = { 0, 10, 20, 35, 60, 100, 150, 0 };
 static const int8_t PHASE[7] = { 0, 0, 1, 1, 2, 4, 0 };
 
-int evaluate(const Pos *p) {
+/* the hand-written evaluation (without a network, or NO_NNUE) */
+__attribute__((unused)) static int hce_evaluate(const Pos *p) {
   const uint8_t *b = p->b;
   int mg[2] = { 0, 0 }, eg[2] = { 0, 0 }, phase = 0, bish[2] = { 0, 0 };
   int8_t pcnt[2][10], pmin[2][10], pmax[2][10];
@@ -720,6 +735,80 @@ int evaluate(const Pos *p) {
   int sc = (m * phase + e * (24 - phase)) / 24;
   return (p->side == WHITE ? sc : -sc) + 10;
 }
+
+/* ------------------------------------------------------------------ */
+/*  The evaluation network (src/nnue_chess.h, tools/nnue/train.py)    */
+/* ------------------------------------------------------------------ */
+/* Each side's view: 12 x 64 inputs (its own pieces first, the board turned over for Black), one layer of NNC_HID
+   kept up to date (the "accumulator"), clipped to 0..QA, then one output. In the search each ply keeps its
+   accumulators (nn_acc) with the key of the position they belong to: a position's come from the nearest ply below
+   whose are current, by the squares that changed between the boards (castling, en passant, promotion alike). */
+#ifdef HAVE_NNUE
+static inline int nn_feat(int pc, int sq, int view) {
+  int col = PCOLOR(pc), r = RANK_OF(sq);
+  if (view) { col ^= 1; r = 7 - r; }
+  return ((col * 6 + PTYPE(pc) - 1) * 64 + r * 8 + FILE_OF(sq)) * NNC_HID;
+}
+static void nn_refresh(const Pos *p, int16_t a[2][NNC_HID]) {
+  for (int v = 0; v < 2; v++) {
+    memcpy(a[v], NNC_B1, sizeof NNC_B1);
+    for (int s = 0; s < 128; s++) {
+      if (s & 0x88) { s += 7; continue; }
+      if (!p->b[s]) continue;
+      const int16_t *w = NNC_W1 + nn_feat(p->b[s], s, v);
+      for (int i = 0; i < NNC_HID; i++) a[v][i] += w[i];
+    }
+  }
+}
+static void nn_update(const Pos *o, const Pos *n, int16_t src[2][NNC_HID], int16_t dst[2][NNC_HID]) {
+  memcpy(dst, src, 2 * NNC_HID * sizeof(int16_t));
+  const uint32_t *wo = (const uint32_t *)o->b, *wn = (const uint32_t *)n->b;
+  for (int k = 0; k < 32; k++) {
+    if (wo[k] == wn[k]) continue;
+    for (int s = 4 * k; s < 4 * k + 4; s++) {
+      int a = o->b[s], b = n->b[s];
+      if (a == b) continue;
+      for (int v = 0; v < 2; v++) {
+        if (a) { const int16_t *w = NNC_W1 + nn_feat(a, s, v); for (int i = 0; i < NNC_HID; i++) dst[v][i] -= w[i]; }
+        if (b) { const int16_t *w = NNC_W1 + nn_feat(b, s, v); for (int i = 0; i < NNC_HID; i++) dst[v][i] += w[i]; }
+      }
+    }
+  }
+}
+static int nn_output(const int16_t a[2][NNC_HID], int side) {
+  int32_t out = NNC_B2;
+  const int16_t *us = a[side], *them = a[side ^ 1];
+  for (int i = 0; i < NNC_HID; i++) {
+    int x = us[i] < 0 ? 0 : us[i] > NNC_QA ? NNC_QA : us[i];
+    int y = them[i] < 0 ? 0 : them[i] > NNC_QA ? NNC_QA : them[i];
+    out += x * NNC_W2[i] + y * NNC_W2[NNC_HID + i];
+  }
+  return (int)((int64_t)out * NNC_SCALE / (NNC_QA * NNC_QB));
+}
+int evaluate(const Pos *p) {
+  if (eval_hand) return hce_evaluate(p);                     /* levels 1-3 */
+  uintptr_t d = (uintptr_t)p - (uintptr_t)stk;                /* unsigned: a position elsewhere is far out */
+  int ply = (int)(d / sizeof(Pos));
+  if (!stk || d >= (MAXPLY + 2) * sizeof(Pos) || d % sizeof(Pos)) {   /* outside the search: from the board */
+    int16_t a[2][NNC_HID];
+    nn_refresh(p, a);
+    return nn_output(a, p->side);
+  }
+  if (nn_key[ply] != p->key) {
+    int k = ply - 1;
+    while (k >= 0 && nn_key[k] != stk[k].key) k--;
+    if (k < 0) { nn_refresh(&stk[0], nn_acc[0]); nn_key[0] = stk[0].key; k = 0; }
+    for (; k < ply; k++) { nn_update(&stk[k], &stk[k + 1], nn_acc[k], nn_acc[k + 1]); nn_key[k + 1] = stk[k + 1].key; }
+  }
+#ifdef NN_CHECK
+  { int16_t t[2][NNC_HID]; nn_refresh(p, t);                 /* the update must give the recount's numbers */
+    if (memcmp(t, nn_acc[ply], sizeof t)) { extern void nn_check_failed(void); nn_check_failed(); } }
+#endif
+  return nn_output(nn_acc[ply], p->side);
+}
+#else
+int evaluate(const Pos *p) { return hce_evaluate(p); }
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  Search                                                            */

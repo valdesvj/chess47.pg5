@@ -31,7 +31,7 @@ const MODE_HC = 0, MODE_HH = 1, MODE_CC = 2, MODE_CNT = 3;
 const MODE_NAME = ['You vs CPU', '2 players', 'CPU vs CPU'];
 const LEVELS = [
   { name: 'CRAZY', depth: 0, ms: 0, noise: 0 },
-  { name: '1', depth: 1, ms: 0, noise: 150 }, { name: '2', depth: 2, ms: 0, noise: 80 }, { name: '3', depth: 3, ms: 0, noise: 40 },
+  { name: '1', depth: 1, ms: 0, noise: 150, hand: 1 }, { name: '2', depth: 2, ms: 0, noise: 80, hand: 1 }, { name: '3', depth: 3, ms: 0, noise: 40, hand: 1 },
   { name: '4', depth: 5, ms: 500, noise: 6 }, { name: '5', depth: 40, ms: 1000, noise: 2 }, { name: '6', depth: 40, ms: 2500, noise: 0 },
   { name: '7', depth: 40, ms: 5000, noise: 0 }, { name: '8', depth: 40, ms: 10000, noise: 0 }, { name: '9', depth: 40, ms: 30000, noise: 0 },
 ];
@@ -311,7 +311,7 @@ function worker_main() {                                  /* runs inside the wor
       for (const m of d.moves) { const n = X.newPos(); X.xq_make_move(q, n, m); q = n; keys.push([q.hi, q.lo]); }
       const t0 = performance.now();
       const r = X.xq_search(q, keys, {
-        depth: d.depth, time_ms: d.ms, noise: d.noise, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
+        depth: d.depth, time_ms: d.ms, noise: d.noise, hand_eval: d.hand, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
         info: (depth, score, nodes, best) => {
           const pv = []; let a = q;
           for (const m of X.xq_search_pv(q, best, 12)) { pv.push(X.xq_move_to_wxf(a, m)); const n = X.newPos(); X.xq_make_move(a, n, m); a = n; }
@@ -331,7 +331,7 @@ function worker_main() {                                  /* runs inside the wor
     for (const m of d.moves) { const n = E.newPos(); E.make_move(q, n, m); q = n; keys.push([q.hi, q.lo]); }
     const t0 = performance.now();
     const r = E.search(q, keys, {
-      depth: d.depth, time_ms: d.ms, noise: d.noise, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
+      depth: d.depth, time_ms: d.ms, noise: d.noise, hand_eval: d.hand, seed: d.seed, max_nodes: d.max_nodes, now: () => performance.now(),
       info: (depth, score, nodes, best) => {
         const pv = []; let a = q;
         for (const m of E.search_pv(q, best, 12)) { pv.push(E.move_to_san(a, m)); const n = E.newPos(); E.make_move(a, n, m); a = n; }
@@ -342,14 +342,14 @@ function worker_main() {                                  /* runs inside the wor
   };
 }
 function worker_call(msg) { if (!worker) worker_make(); worker.postMessage(msg); }
-function run_search(depth, ms, noise, oninfo) {
+function run_search(depth, ms, noise, oninfo, hand) {
   return new Promise(resolve => {
     wjob = { resolve, oninfo, best: 0 };
     const max_nodes = cfg.calc ? Math.max(1, (ms || 0) * DM42N_NPS) : 0;
     worker_call(xq ? { cmd: 'xsearch', start: XG.start, moves: XG.moves.slice(0, XG.n), depth, ms: cfg.calc && ms ? 0 : ms,
-                       noise, seed: (Math.random() * 4294967296) >>> 0, max_nodes: cfg.calc && ms ? max_nodes : 0 } :
+                       noise, hand: hand ? 1 : 0, seed: (Math.random() * 4294967296) >>> 0, max_nodes: cfg.calc && ms ? max_nodes : 0 } :
                 {     cmd: 'search', start: G.start, rfile: G.rfile, c960: G.c960, moves: G.moves.slice(0, G.n),
-                  depth, ms: cfg.calc && ms ? 0 : ms, noise, seed: (Math.random() * 4294967296) >>> 0,
+                  depth, ms: cfg.calc && ms ? 0 : ms, noise, hand: hand ? 1 : 0, seed: (Math.random() * 4294967296) >>> 0,
                   max_nodes: cfg.calc && ms ? max_nodes : 0 });
   });
 }
@@ -436,7 +436,7 @@ async function cpu_move() {
       status = E.IS_MATE(d.score) ? `d${d.depth} ${d.san} M${d.score < 0 ? '-' : ''}${Math.floor((E.MATE - Math.abs(d.score) + 1) / 2)}`
                                   : `d${d.depth} ${d.san} ${d.score >= 0 ? '+' : '-'}${Math.floor(Math.abs(d.score) / 100)}.${String(Math.abs(d.score) % 100).padStart(2, '0')}`;
       redraw();
-    });
+    }, L.hand);
     thinking = 0; think = null;
     if (r.discard || G.n !== n0 || G.over) return;        /* stopped (resign, draw, new game) */
     last = { depth: r.depth, nodes: r.nodes, ms: r.ms, score: r.score };
@@ -1042,7 +1042,7 @@ async function xq_cpu_move() {
   else {
     thinking = 1; status = 'Thinking...'; think = { pv: [], nodes: 0, t0: now() }; redraw();
     const n0 = XG.n;
-    const r = await run_search(L.depth, think_time(L.ms), L.noise, d => { think_info(d); status = score_text(d); redraw(); });
+    const r = await run_search(L.depth, think_time(L.ms), L.noise, d => { think_info(d); status = score_text(d); redraw(); }, L.hand);
     thinking = 0; think = null;
     if (r.discard || XG.n !== n0 || XG.over || !xq) return;
     last = { depth: r.depth, nodes: r.nodes, ms: r.ms, score: r.score };

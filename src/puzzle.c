@@ -192,7 +192,7 @@ static void pz_wrong(const char *why) {
 
 /* the score of the position after the solver's move, from the solver's side (a short search) */
 static int pz_search_score(uint32_t ms) {
-  Result r = run_search(40, ms, 0);
+  Result r = run_search(40, ms, 0, 0);
   return -r.score;                                      /* the search scores for the side to move: the defence */
 }
 
@@ -237,7 +237,7 @@ static int pz_turn(void) {
   }
   /* the defence */
   Move m = online ? pz_line_move(G->n, CUR) : 0;
-  if (!m) { Result r = run_search(40, 1500, 0); m = r.best ? r.best : G->legal[0]; }
+  if (!m) { Result r = run_search(40, 1500, 0, 0); m = r.best ? r.best : G->legal[0]; }
   sys_delay(250);
   do_move(m);
   pz_checked = G->n;
@@ -252,7 +252,7 @@ static int pz_turn(void) {
 static void pz_hint_key(void) {
   if (pz_done || G->over || CUR->side != G->hist[0].side) return;
   Move m = pz_on_line() ? pz_line_move(G->n, CUR) : 0;
-  if (!m) { Result r = run_search(40, 1500, 0); m = r.best; }
+  if (!m) { Result r = run_search(40, 1500, 0, 0); m = r.best; }
   if (!m) return;
   pz_hint = (int8_t)(pz_hint >= 1 ? 2 : 1);
   hint_from = MFROM(m);

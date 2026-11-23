@@ -589,7 +589,7 @@ static inline void xq_null(const Pos *p, Pos *n) { *n = *p; n->side ^= 1; n->key
 #define G_ORDER_ADJ(m)         0
 #define G_HIDX(p, m)           (((p)->b[XFROM(m)] << 8) | XTO(m))
 #define G_HSIZE                (16 * 256)
-#define G_QPRUNE(p, m, st, a)  ((st) + XVAL[XTYPE((p)->b[XTO(m)])] + 200 < (a))
+#define G_QPRUNE(p, m, st, a)  ((st) + XVAL[XTYPE((p)->b[XTO(m)])] + SP_DELTA < (a))
 #define G_DRAWN(p)             ((p)->half >= 120)
 #define G_HAS_PIECES(p)        has_pieces(p)
 #define G_NULL_MOVE(p, n)      xq_null(p, n)

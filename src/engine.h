@@ -40,6 +40,7 @@ typedef struct {
   uint8_t  side, castle, ep, half;
   uint16_t fullmove;
   uint8_t  ksq[2];
+  uint8_t  men;                 /* pieces on the board, kings included (the endgame rules) */
   uint64_t key;
 } Pos;
 

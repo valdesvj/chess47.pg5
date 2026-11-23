@@ -8,6 +8,11 @@ and more), a **thinking display** (the CPU's expected line, its search counts an
 (play Stockfish or Lichess with the calculator as your board). **Xiangqi** (Chinese chess) is built in, with the
 same engine, and the whole program also runs in a browser (`web/chess47.html`).
 
+The engine judges positions with a small **neural network** (NNUE, trained for this program, one for each game) and
+knows the basic endgames exactly (king and pawn against king from a table; the mates with queen, rook, and bishop and
+knight). Its strength runs from about 1100 (level 1) to about 2900 (level 9) on Stockfish's scale: see
+[Strength](#strength-measured-against-stockfish).
+
 Part of the "47" family of projects (almanac47, chess47, logic47, tide47 …).
 This is the native C sister of the RPN `chess47` program for the C47.
 
@@ -15,6 +20,32 @@ This is the native C sister of the RPN `chess47` program for the C47.
 
 *A 15+10 game against level 4; level 9 thinking (its expected line, the counts, its move marked); Chess960 with the
 clock OFF (each side's time used); the CRAZY level.*
+
+### New in v1.6: endgame knowledge (chess)
+
+The network plays the middlegame well but did not know how to finish a few basic endgames. Chess 47 now has rules
+for them (levels 4–9):
+
+- **King and pawn against king**: a 24 KB table of every position (`src/kpk.h`, made by `tools/kpk_gen.c` and
+  checked against Stockfish), so it knows exactly which ones win and which are draws.
+- **King and queen, or rook, against king**: the bare king is driven to the edge and mated.
+- **King, bishop and knight against king**: the king is driven to a corner of the bishop's colour, the hardest of the
+  basic mates.
+- Material that cannot force mate (one minor piece, two knights) counts as a draw, so it is no longer traded into.
+
+Won positions converted against Stockfish's defence before the 50-move rule (`test/endgames.py`, 50k nodes a move):
+
+| | v1.5 | v1.6 |
+|---|---|---|
+| King and pawn | 15 / 20 | **30 / 30** |
+| Bishop and knight | 1 / 20 | **30 / 30** |
+| Queen, rook | — | **60 / 60** |
+
+The search's pruning margins were also tested on the network's scale (×0.7 to ×2): the current ones were the best, so
+they stay.
+
+Every level was measured again ([Strength](#the-levels-v16-november-2026)): in chess from about 1120 (level 1) to
+about 2920 (level 9) on Stockfish's scale.
 
 ### New in v1.5: neural-network evaluation (NNUE), chess and Xiangqi
 
@@ -228,7 +259,9 @@ also press on the king's destination square. Promotion asks Queen/Rook/Bishop/Kn
 | 3 | PGN | MODE | QR | USB | INFO | >> |
 
 * **LEVEL**: CRAZY (random legal moves, with the crazy emoticon), then 1–3 (fixed shallow
-  depth plus randomness) and 4–9 (0.5 s → 30 s per move). Levels 4+ use a small opening book.
+  depth plus randomness, the simpler hand-written evaluation) and 4–9 (0.5 s → 30 s per move, the neural network
+  and the endgame rules). Levels 4+ use a small opening book. The estimated rating of each level is in
+  [Strength](#strength-measured-against-stockfish).
 * **960**: type a Chess960 position number 0–959 and press ENTER. ENTER alone picks a random one.
   NEW then deals another random 960 position.
 * **CLOCK**: the time control, before the first move; during a game it stops the clock ([below](#the-clock)).
@@ -294,6 +327,51 @@ The status line also answers the keys: **Clock 15+10** (CLOCK before the first m
 **Level 9**, **Hint: Nf3**, **Book: e5** (an opening book move), **Thinking...** until the first depth is done.
 
 ## Strength (measured against Stockfish)
+
+### The levels (v1.6, November 2026)
+
+Each level of the PC build against **Stockfish** (chess) or **Fairy-Stockfish** (Xiangqi) at a fixed `UCI_Elo`, 100 ms
+a move, 40 games (Xiangqi 30) per match from random openings with both colours. Each level searched the nodes the
+DM42n would search in its time on USB power (~19k nodes/s, an estimate: the network's speed on the calculator is not
+measured yet). The rating is the maximum-likelihood fit over the level's matches. Scripts: `test/match.py --level`,
+`test/xq_match.py --level`.
+
+**Chess:**
+
+| Level | Search | Nodes/move | Results vs Stockfish (`UCI_Elo`: +W =D −L) | Est. Elo (95%) |
+|---|---|---:|---|---:|
+| 1 | 1 ply + noise, hand-written eval | — | 1320: +8 =3 −29 | **~1120** (980–1240) |
+| 2 | 2 plies + noise, hand-written eval | — | 1320: +16 =6 −18 | **~1300** (1190–1410) |
+| 3 | 3 plies + noise, hand-written eval | — | 1320: +32 =3 −5, 1600: +21 =1 −18 | **~1620** (1530–1710) |
+| 4 | 5 plies, 0.5 s | 9 500 | 1600: +34 =1 −5, 2000: +27 =4 −9 | **~2100** (2000–2210) |
+| 5 | 1 s | 19 000 | 1900: +33 =4 −3, 2300: +26 =5 −9 | **~2400** (2300–2510) |
+| 6 | 2.5 s | 47 500 | 2100: +31 =4 −5, 2500: +19 =8 −13 | **~2500** (2400–2590) |
+| 7 | 5 s | 95 000 | 2300: +26 =7 −7, 2700: +18 =15 −7 | **~2680** (2590–2780) |
+| 8 | 10 s | 190 000 | 2400: +27 =7 −6, 2800: +17 =12 −11, 3000: +4 =9 −27 | **~2770** (2690–2840) |
+| 9 | 30 s | 570 000 | 2500: +32 =5 −3, 2900: +12 =14 −14, 3100: +10 =9 −21 | **~2920** (2840–2990) |
+
+**Xiangqi** (on Fairy-Stockfish's scale, which is not a Xiangqi rating: see the notes below the older tables):
+
+| Level | Nodes/move | Results vs Fairy-Stockfish (`UCI_Elo`: +W =D −L) | Est. |
+|---|---:|---|---:|
+| 1 | — | 900: +13 =0 −17, 1300: +9 =1 −20 | ~980 |
+| 2 | — | 1300: +19 =1 −10, 1700: +15 =0 −15 | ~1570 |
+| 3 | — | 1700: +20 =0 −10, 2100: +1 =1 −28 | ~1760 |
+| 4 | 9 500 | 2000: +26 =0 −4, 2400: +28 =0 −2 | above 2400 |
+| 5 | 19 000 | 2200: +30 =0 −0, 2600: +25 =2 −3 | above 2600 |
+| 6–9 | 47 500 – 570 000 | 2600–2850: 87–98% each | **above 2850**, its strongest limited setting |
+
+From level 4 the Xiangqi engine wins almost every game even against Fairy-Stockfish's strongest `UCI_Elo` (2850), so
+this scale cannot rank levels 4–9 any more.
+
+Read the numbers with care:
+* Stockfish's `UCI_Elo` is calibrated at longer time controls; at 100 ms a move it plays below its nominal rating, so
+  the chess ratings are probably **optimistic by 100–200 points**.
+* The node budgets assume ~19k nodes/s on the DM42n on USB power; on battery (about half the speed) a level plays
+  roughly like the level below it.
+* 40 games give about ±100 Elo at 95%.
+
+### Earlier measurements (v1.1)
 
 **v1.1 updated (November 2026): a stronger search for both games, and a new Xiangqi evaluation.** Measured against the
 first v1.1 with the same
@@ -373,7 +451,7 @@ python3 test/xq_match.py --fairy ~/opt/Fairy-Stockfish/src/stockfish --nodes 400
 Needs pyffish (`python -m venv ~/opt/venv-xq && ~/opt/venv-xq/bin/pip install ~/opt/Fairy-Stockfish`) and
 Fairy-Stockfish built with `largeboards=yes`.
 
-**Roughly 1850 on battery at the middle levels, 2200–2300 on USB power, about 2480 at level 9 on USB power (about 2200 on battery).**
+**v1.1: roughly 1850 on battery at the middle levels, 2200–2300 on USB power, about 2480 at level 9 on USB power (about 2200 on battery). For v1.6 see [the levels](#the-levels-v16-november-2026).**
 
 Please read these as rough estimates:
 * 20 games per match means about ±100 Elo of statistical error.
@@ -561,8 +639,8 @@ GAMES=20 test/run_matches.sh
 |---|---|
 | Board | 0x88, copy-make, Zobrist hashing |
 | Moves | fully legal, en passant, promotions, **Chess960 castling** (X-FEN/Shredder-FEN), perft-verified |
-| Search | iterative deepening, PVS alpha-beta, transposition table, null move, LMR, check extension, killers + history, quiescence with delta pruning, repetition/50-move detection |
-| Eval | NNUE: (12 × 64 inputs → 128) × 2 sides → 1, int16, updated incrementally (Xiangqi: 14 × 90 inputs). Levels 1–3: material + piece-square tables (tapered), mobility, pawn structure, rooks on open files, bishop pair, development, king pawn shield |
+| Search | iterative deepening, PVS alpha-beta with aspiration windows, transposition table (2-entry buckets), null move, reverse futility / futility / late-move pruning, table-based LMR, check extension, killers + history with penalties, quiescence with the hash table, delta pruning and losing captures skipped, mate distance pruning, repetition/50-move detection |
+| Eval | NNUE: (12 × 64 inputs → 128) × 2 sides → 1, int16, updated incrementally (Xiangqi: 14 × 90 inputs). Endgames: king and pawn against king from a 24 KB table, mating rules for queen, rook, bishop + knight against a bare king, unwinnable material scored as a draw. Levels 1–3: material + piece-square tables (tapered), mobility, pawn structure, rooks on open files, bishop pair, development, king pawn shield |
 | Memory | 4.1 KB of the 8 KB static RAM. Everything else (engine tables, hash table sized from free heap, 33 KB of network accumulators per game, game history) is on the heap; the network weights stay in flash |
 | Speed | about 5,000 instructions per node, so an estimated ~10k nodes/s on battery (80 MHz) and ~19k nodes/s on USB power (160 MHz) |
 

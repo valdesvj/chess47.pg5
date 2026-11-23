@@ -63,7 +63,11 @@ def nnue(file, G):
     b64 = lambda k: base64.b64encode(array.array('h', vals(k)).tobytes()).decode()
     return {'hid': num('HID'), 'qa': num('QA'), 'qb': num('QB'), 'scale': num('SCALE'), 'w1': b64('W1'), 'b1': b64('B1'),
             'w2': b64('W2'), 'b2': int(re.search(r'%s_B2 = (-?\d+)' % G, h).group(1))}
-nets = 'self.NNUE47 = ' + json.dumps({'chess': nnue('nnue_chess.h', 'NNC'), 'xq': nnue('nnue_xq.h', 'NNX')},
+def kpk():
+    if not os.path.exists(os.path.join(ROOT, 'src', 'kpk.h')):
+        return None
+    return base64.b64encode(bytes(int(v) for v in re.search(r'\{([^}]*)\}', rd('src/kpk.h')).group(1).split(','))).decode()
+nets = 'self.NNUE47 = ' + json.dumps({'chess': nnue('nnue_chess.h', 'NNC'), 'xq': nnue('nnue_xq.h', 'NNX'), 'kpk': kpk()},
                                      separators=(',', ':')) + ';\n'
 html = rd('web/app.html').replace('/*ENGINE*/', nets + rd('web/engine.js') + '\n' + rd('web/xq_engine.js'))
 html = html.replace('/*PIECES*/', bmp).replace('/*APP*/', rd('web/app.js'))

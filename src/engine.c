@@ -12,6 +12,7 @@
 /* the evaluation network, when tools/nnue/train.py has made one (NO_NNUE: the hand-written evaluation) */
 #if !defined(NO_NNUE) && __has_include("nnue_chess.h")
 #include "nnue_chess.h"
+#include "kpk.h"
 #define HAVE_NNUE 1
 static int16_t (*nn_acc)[2][NNC_HID];        /* [MAXPLY + 2] the accumulators of the search's plies */
 static uint64_t *nn_key;                     /* [MAXPLY + 2] the position each belongs to */
@@ -192,6 +193,7 @@ int pos_from_fen(Pos *p, const char *f) {
     int i = (int)(q - PCH);
     int pc = (i % 6 + 1) | (i >= 6 ? BLK : 0);
     p->b[SQ(fl, r)] = (uint8_t)pc;
+    p->men++;
     if (PTYPE(pc) == KING) { p->ksq[PCOLOR(pc)] = (uint8_t)SQ(fl, r); kings |= 1 << PCOLOR(pc); }
     fl++;
   }
@@ -426,9 +428,11 @@ int make_move(const Pos *p, Pos *n, Move m) {
       k ^= ZP(n->b[cs], cs);
       n->b[cs] = 0;
       n->half = 0;
+      n->men--;
     } else if (n->b[to]) {
       k ^= ZP(n->b[to], to);
       n->half = 0;
+      n->men--;
     }
     int np = MPROMO(m) ? (MPROMO(m) | (us << 3)) : pc;
     n->b[from] = 0;           k ^= ZP(pc, from);
@@ -785,8 +789,68 @@ static int nn_output(const int16_t a[2][NNC_HID], int side) {
   }
   return (int)((int64_t)out * NNC_SCALE / (NNC_QA * NNC_QB));
 }
+/* The endgames the network does not know well (4 men or fewer): king and pawn against king from the table
+   (tools/kpk_gen.c: a draw is 0); a bare king against a queen, a rook or two bishops (driven to the edge, the kings
+   close) and against bishop and knight (driven to a corner of the bishop's colour). 1 and *e (side to move's view)
+   if the position is one of them. */
+static int cheb64(int a, int b) {
+  int df = (a & 7) - (b & 7), dr = (a >> 3) - (b >> 3);
+  if (df < 0) df = -df;
+  if (dr < 0) dr = -dr;
+  return df > dr ? df : dr;
+}
+#define SQ64(s) (RANK_OF(s) * 8 + FILE_OF(s))
+static int endgame(const Pos *p, int *e) {
+  int pc[2], sq[2], n = 0;
+  for (int s = 0; s < 120; s++) {
+    if (s & 8) { s += 7; continue; }
+    if (!p->b[s] || PTYPE(p->b[s]) == KING) continue;
+    if (n == 2) return 0;
+    pc[n] = p->b[s]; sq[n] = s; n++;
+  }
+  if (n == 1 && PTYPE(pc[0]) == PAWN) {
+    int c = PCOLOR(pc[0]);
+    int wk = SQ64(p->ksq[c]), bk = SQ64(p->ksq[c ^ 1]), ps = SQ64(sq[0]), stm = p->side != c;
+    if (c == BLACK) { wk ^= 56; bk ^= 56; ps ^= 56; }
+    if ((ps & 7) > 3) { wk ^= 7; bk ^= 7; ps ^= 7; }
+    int i = ((stm * 24 + ((ps >> 3) - 1) * 4 + (ps & 7)) * 64 + wk) * 64 + bk;
+    int v = (KPK[i >> 3] >> (i & 7)) & 1 ? 600 + 30 * (ps >> 3) : 0;
+    *e = p->side == c ? v : -v;
+    return 1;
+  }
+  if (n == 2 && PCOLOR(pc[0]) != PCOLOR(pc[1])) return 0;
+  int c = n ? PCOLOR(pc[0]) : 0, t0 = n ? PTYPE(pc[0]) : 0, t1 = n == 2 ? PTYPE(pc[1]) : 0;
+  if (!t1 ? t0 != QUEEN && t0 != ROOK : t0 == KNIGHT && t1 == KNIGHT) {
+    *e = 0;                                    /* no mate can be forced: king and one minor piece, or two knights */
+    return 1;
+  }
+  int w = SQ64(p->ksq[c ^ 1]), kd = cheb64(SQ64(p->ksq[c]), w);
+  if (t0 == QUEEN || t0 == ROOK || t1 == QUEEN || t1 == ROOK || (t0 == BISHOP && t1 == BISHOP)) {
+    if (t0 == PAWN || t1 == PAWN) return 0;
+    if (t0 == BISHOP && ((FILE_OF(sq[0]) + RANK_OF(sq[0]) + FILE_OF(sq[1]) + RANK_OF(sq[1])) & 1) == 0) {
+      *e = 0;                                                       /* two bishops on one colour: no mate */
+      return 1;
+    }
+    int f = w & 7, r = w >> 3, cf = f < 4 ? 3 - f : f - 4, cr = r < 4 ? 3 - r : r - 4;
+    static const int16_t PV[7] = { 0, 100, 320, 330, 500, 900, 0 };
+    int v = 500 + PV[t0] + PV[t1] + 50 * (cf > cr ? cf : cr) + 10 * (7 - kd);
+    *e = p->side == c ? v : -v;
+    return 1;
+  }
+  if (n == 2 && t0 + t1 == KNIGHT + BISHOP && t0 != t1) {
+    int bs = SQ64(t0 == BISHOP ? sq[0] : sq[1]), dark = !(((bs & 7) + (bs >> 3)) & 1);       /* a1 is dark */
+    int d1 = (w & 7) + (w >> 3), d2 = 14 - d1;                              /* to a1 / h8 */
+    if (!dark) { d1 = (7 - (w & 7)) + (w >> 3); d2 = 14 - d1; }             /* to h1 / a8 */
+    int ns = SQ64(t0 == KNIGHT ? sq[0] : sq[1]);
+    int v = 1000 + 30 * (14 - (d1 < d2 ? d1 : d2)) + 10 * (7 - kd) - 3 * cheb64(ns, w);
+    *e = p->side == c ? v : -v;
+    return 1;
+  }
+  return 0;
+}
 int evaluate(const Pos *p) {
   if (eval_hand) return hce_evaluate(p);                     /* levels 1-3 */
+  if (p->men <= 4) { int e; if (endgame(p, &e)) return e; }
   uintptr_t d = (uintptr_t)p - (uintptr_t)stk;                /* unsigned: a position elsewhere is far out */
   int ply = (int)(d / sizeof(Pos));
   if (!stk || d >= (MAXPLY + 2) * sizeof(Pos) || d % sizeof(Pos)) {   /* outside the search: from the board */
@@ -837,10 +901,10 @@ static inline int32_t chess_tactical(const Pos *p, Move m) {
   return MPROMO(m) == QUEEN ? 950000 : -1;
 }
 
-static inline int chess_qprune(const Pos *p, Move m, int stand, int alpha) {
+static inline int chess_qprune(const Pos *p, Move m, int stand, int alpha, int margin) {
   if (MPROMO(m)) return 0;
   int vic = (MFLAGS(m) & F_EP) ? PAWN : PTYPE(p->b[MTO(m)]);
-  return stand + VAL[vic] + 200 < alpha;
+  return stand + VAL[vic] + margin < alpha;
 }
 
 static inline int chess_badcap(const Pos *p, Move m) {
@@ -869,7 +933,7 @@ const EngShared *eng_shared(void) {
 #define G_ORDER_ADJ(m)         ((MPROMO(m) && MPROMO(m) != QUEEN) ? -2000000 : 0)   /* under-promotions last */
 #define G_HIDX(p, m)           (((p)->b[MFROM(m)] << 7) | MTO(m))
 #define G_HSIZE                (16 * 128)
-#define G_QPRUNE(p, m, st, a)  chess_qprune(p, m, st, a)
+#define G_QPRUNE(p, m, st, a)  chess_qprune(p, m, st, a, SP_DELTA)
 #define G_DRAWN(p)             ((p)->half >= 100)
 #define G_HAS_PIECES(p)        has_pieces(p)
 #define G_NULL_MOVE(p, n)      chess_null(p, n)

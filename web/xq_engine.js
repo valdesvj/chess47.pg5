@@ -495,7 +495,7 @@ function xq_evaluate(p) {
 
 /* ---- the search: src/search.inc with Xiangqi's hooks ---- */
 const ORDV = [0, 9, 2, 2, 4, 6, 5, 1];
-const SP_RFP = 90, SP_FUT = 150, SP_LMP = 4, SP_ASP = 25;  /* as src/search.inc */
+const SP_RFP = 90, SP_FUT = 150, SP_DELTA = 200, SP_LMP = 4, SP_ASP = 25;  /* as src/search.inc */
 /* the late move reductions (src/lmr.h): 0.75 + ln(depth) ln(move number) / 2.25 (test/test_web.js: the C's table) */
 const LMR_T = new Uint8Array(32 * 64);
 for (let d = 1; d < 32; d++) for (let m = 1; m < 64; m++) LMR_T[d * 64 + m] = Math.floor(0.75 + Math.log(d) * Math.log(m) / 2.25);
@@ -572,7 +572,7 @@ function qsearch(ply, alpha, beta) {
   order(p, o, n, 0, ply);
   for (let i = 0; i < n; i++) {
     const m = pick(o, n, i);
-    if (stand + XVAL[XTYPE(p.b[XTO(m)])] + 200 < alpha) continue;
+    if (stand + XVAL[XTYPE(p.b[XTO(m)])] + SP_DELTA < alpha) continue;
     if (sbuf[o + i] < 0) continue;                       /* a losing capture */
     if (!xq_make_move(p, stk[ply + 1], m)) continue;
     const s = -qsearch(ply + 1, -beta, -alpha);

@@ -25,6 +25,9 @@
 #ifndef SP_FUT
 #define SP_FUT 150       /* futility: quiet moves skipped when the static score is this far below alpha a ply */
 #endif
+#ifndef SP_DELTA
+#define SP_DELTA 200     /* delta pruning in quiescence: a capture skipped when even this much more stays below alpha */
+#endif
 #ifndef SP_LMP
 #define SP_LMP 4         /* late move pruning: quiet moves after 4 + 2 depth^2 tries skipped (depth <= 3) */
 #endif

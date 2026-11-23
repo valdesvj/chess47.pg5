@@ -25,11 +25,11 @@ const E = {};                                          /* the engine's shared st
 E.c_rfile = [7, 0];
 E.chess960 = 0;
 
-/* ---- positions: b[128], side, castle, ep, half, fullmove, k0 k1 (the kings), hi lo (the key) ---- */
-function newPos() { return { b: new Uint8Array(128), side: 0, castle: 0, ep: NOSQ, half: 0, fullmove: 1, k0: 0, k1: 0, hi: 0, lo: 0 }; }
+/* ---- positions: b[128], side, castle, ep, half, fullmove, k0 k1 (the kings), men (pieces on the board), hi lo (the key) ---- */
+function newPos() { return { b: new Uint8Array(128), side: 0, castle: 0, ep: NOSQ, half: 0, fullmove: 1, k0: 0, k1: 0, men: 0, hi: 0, lo: 0 }; }
 function copyPos(d, s) {
   d.b.set(s.b); d.side = s.side; d.castle = s.castle; d.ep = s.ep; d.half = s.half; d.fullmove = s.fullmove;
-  d.k0 = s.k0; d.k1 = s.k1; d.hi = s.hi; d.lo = s.lo; return d;
+  d.k0 = s.k0; d.k1 = s.k1; d.men = s.men; d.hi = s.hi; d.lo = s.lo; return d;
 }
 const ksq = (p, c) => c ? p.k1 : p.k0;
 function setK(p, c, s) { if (c) p.k1 = s; else p.k0 = s; }
@@ -131,7 +131,7 @@ function insufficient(p) {
 /* ---- FEN ---- */
 const PCH = 'PNBRQKpnbrqk';
 function pos_from_fen(p, f) {
-  p.b.fill(0); p.side = 0; p.castle = 0; p.ep = NOSQ; p.half = 0; p.fullmove = 1; p.k0 = p.k1 = 0;
+  p.b.fill(0); p.side = 0; p.castle = 0; p.ep = NOSQ; p.half = 0; p.fullmove = 1; p.k0 = p.k1 = 0; p.men = 0;
   const parts = f.trim().split(/\s+/);
   let r = 7, fl = 0, kings = 0;
   for (const ch of parts[0] || '') {
@@ -140,7 +140,7 @@ function pos_from_fen(p, f) {
     const i = PCH.indexOf(ch);
     if (i < 0 || fl > 7 || r < 0) return 0;
     const pc = (i % 6 + 1) | (i >= 6 ? BLK : 0);
-    p.b[SQ(fl, r)] = pc;
+    p.b[SQ(fl, r)] = pc; p.men++;
     if (PTYPE(pc) === KING) { setK(p, PCOLOR(pc), SQ(fl, r)); kings |= 1 << PCOLOR(pc); }
     fl++;
   }
@@ -315,8 +315,8 @@ function make_move(p, n, m) {
     if (fl & F_EP) {
       const cs = us === WHITE ? to - 16 : to + 16;
       i = (n.b[cs] << 7) | cs; h ^= zpH[i]; l ^= zpL[i];
-      n.b[cs] = 0; n.half = 0;
-    } else if (n.b[to]) { i = (n.b[to] << 7) | to; h ^= zpH[i]; l ^= zpL[i]; n.half = 0; }
+      n.b[cs] = 0; n.half = 0; n.men--;
+    } else if (n.b[to]) { i = (n.b[to] << 7) | to; h ^= zpH[i]; l ^= zpL[i]; n.half = 0; n.men--; }
     const np = MPROMO(m) ? (MPROMO(m) | (us << 3)) : pc;
     n.b[from] = 0; i = (pc << 7) | from; h ^= zpH[i]; l ^= zpL[i];
     n.b[to] = np; i = (np << 7) | to; h ^= zpH[i]; l ^= zpL[i];
@@ -550,6 +550,59 @@ const NN = (() => {
   return { hid: src.hid, qa: src.qa, qb: src.qb, scale: src.scale, w1: dec(src.w1), b1: dec(src.b1), w2: dec(src.w2), b2: src.b2 };
 })();
 let eval_hand = 0;                                           /* this search: the hand-written evaluation */
+/* the endgames the network does not know well (as src/engine.c's endgame()): the king and pawn against king table
+   (src/kpk.h, base64), a bare king driven to the edge or to the bishop's corner, the material that cannot mate */
+const KPK = (() => {
+  const x = G.NNUE47 && G.NNUE47.kpk;
+  if (!x) return null;
+  if (typeof x !== 'string') return Uint8Array.from(x);
+  const s = typeof atob === 'function' ? atob(x) : Buffer.from(x, 'base64').toString('binary');
+  const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+})();
+const cheb64 = (a, b) => Math.max(Math.abs((a & 7) - (b & 7)), Math.abs((a >> 3) - (b >> 3)));
+const SQ64 = s => RANK_OF(s) * 8 + FILE_OF(s);
+const EG_PV = [0, 100, 320, 330, 500, 900, 0];
+function endgame(p) {                                        /* the score (side to move's view) or null */
+  const pc = [0, 0], sq = [0, 0]; let n = 0;
+  for (let s = 0; s < 120; s++) {
+    if (s & 8) { s += 7; continue; }
+    if (!p.b[s] || PTYPE(p.b[s]) === KING) continue;
+    if (n === 2) return null;
+    pc[n] = p.b[s]; sq[n] = s; n++;
+  }
+  if (n === 1 && PTYPE(pc[0]) === PAWN) {
+    if (!KPK) return null;
+    const c = PCOLOR(pc[0]);
+    let wk = SQ64(ksq(p, c)), bk = SQ64(ksq(p, c ^ 1)), ps = SQ64(sq[0]);
+    const stm = p.side !== c ? 1 : 0;
+    if (c === BLACK) { wk ^= 56; bk ^= 56; ps ^= 56; }
+    if ((ps & 7) > 3) { wk ^= 7; bk ^= 7; ps ^= 7; }
+    const i = ((stm * 24 + ((ps >> 3) - 1) * 4 + (ps & 7)) * 64 + wk) * 64 + bk;
+    const v = (KPK[i >> 3] >> (i & 7)) & 1 ? 600 + 30 * (ps >> 3) : 0;
+    return p.side === c ? v : -v;
+  }
+  if (n === 2 && PCOLOR(pc[0]) !== PCOLOR(pc[1])) return null;
+  const c = n ? PCOLOR(pc[0]) : 0, t0 = n ? PTYPE(pc[0]) : 0, t1 = n === 2 ? PTYPE(pc[1]) : 0;
+  if (!t1 ? t0 !== QUEEN && t0 !== ROOK : t0 === KNIGHT && t1 === KNIGHT) return 0;
+  const w = SQ64(ksq(p, c ^ 1)), kd = cheb64(SQ64(ksq(p, c)), w);
+  if (t0 === QUEEN || t0 === ROOK || t1 === QUEEN || t1 === ROOK || (t0 === BISHOP && t1 === BISHOP)) {
+    if (t0 === PAWN || t1 === PAWN) return null;
+    if (t0 === BISHOP && ((FILE_OF(sq[0]) + RANK_OF(sq[0]) + FILE_OF(sq[1]) + RANK_OF(sq[1])) & 1) === 0) return 0;
+    const f = w & 7, r = w >> 3, cf = f < 4 ? 3 - f : f - 4, cr = r < 4 ? 3 - r : r - 4;
+    const v = 500 + EG_PV[t0] + EG_PV[t1] + 50 * Math.max(cf, cr) + 10 * (7 - kd);
+    return p.side === c ? v : -v;
+  }
+  if (n === 2 && t0 + t1 === KNIGHT + BISHOP && t0 !== t1) {
+    const bs = SQ64(t0 === BISHOP ? sq[0] : sq[1]), dark = !(((bs & 7) + (bs >> 3)) & 1);
+    let d1 = (w & 7) + (w >> 3), d2 = 14 - d1;
+    if (!dark) { d1 = (7 - (w & 7)) + (w >> 3); d2 = 14 - d1; }
+    const ns = SQ64(t0 === KNIGHT ? sq[0] : sq[1]);
+    const v = 1000 + 30 * (14 - Math.min(d1, d2)) + 10 * (7 - kd) - 3 * cheb64(ns, w);
+    return p.side === c ? v : -v;
+  }
+  return null;
+}
 const nn_acc = NN ? Array.from({ length: MAXPLY + 2 }, () => [new Int16Array(NN.hid), new Int16Array(NN.hid)]) : null;
 const nn_kH = new Int32Array(MAXPLY + 2), nn_kL = new Int32Array(MAXPLY + 2), nn_ok = new Uint8Array(MAXPLY + 2);
 for (let i = 0; i < MAXPLY + 2; i++) stk[i].ply = i;
@@ -594,6 +647,7 @@ function nn_output(a, side) {
 const nn_tmp = NN ? [new Int16Array(NN.hid), new Int16Array(NN.hid)] : null;
 function evaluate(p) {
   if (!NN || eval_hand) return hce_evaluate(p);               /* eval_hand: levels 1-3 */
+  if (p.men <= 4) { const e = endgame(p); if (e !== null) return e; }
   const ply = p.ply;
   if (ply === undefined || stk[ply] !== p) { nn_refresh(p, nn_tmp); return nn_output(nn_tmp, p.side); }
   if (!nn_ok[ply] || nn_kH[ply] !== p.hi || nn_kL[ply] !== p.lo) {
@@ -609,7 +663,7 @@ function evaluate(p) {
 }
 
 /* ---- search ---- */
-const SP_RFP = 90, SP_FUT = 150, SP_LMP = 4, SP_ASP = 25;  /* as src/search.inc */
+const SP_RFP = 90, SP_FUT = 150, SP_DELTA = 200, SP_LMP = 4, SP_ASP = 25;  /* as src/search.inc */
 /* the late move reductions (src/lmr.h): 0.75 + ln(depth) ln(move number) / 2.25 (test/test_web.js: the C's table) */
 const LMR_T = new Uint8Array(32 * 64);
 for (let d = 1; d < 32; d++) for (let m = 1; m < 64; m++) LMR_T[d * 64 + m] = Math.floor(0.75 + Math.log(d) * Math.log(m) / 2.25);
@@ -700,7 +754,7 @@ function qsearch(ply, alpha, beta) {
     const m = pick(o, n, i);
     if (!MPROMO(m)) {
       const vic = MFLAGS(m) & F_EP ? PAWN : PTYPE(p.b[MTO(m)]);
-      if (stand + VAL[vic] + 200 < alpha) continue;
+      if (stand + VAL[vic] + SP_DELTA < alpha) continue;
     }
     if (sbuf[o + i] < 0) continue;                       /* a losing capture */
     if (!make_move(p, stk[ply + 1], m)) continue;

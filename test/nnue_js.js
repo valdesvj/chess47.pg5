@@ -11,4 +11,8 @@ function load(file, G) {
   return { hid: num('HID'), qa: num('QA'), qb: num('QB'), scale: num('SCALE'), w1: arr('W1'), b1: arr('B1'), w2: arr('W2'),
            b2: +h.match(new RegExp(G + '_B2 = (-?\\d+)'))[1] };
 }
-globalThis.NNUE47 = { chess: load('nnue_chess.h', 'NNC'), xq: load('nnue_xq.h', 'NNX') };
+function kpk() {                                       // src/kpk.h: king and pawn against king
+  const p = path.join(__dirname, '..', 'src', 'kpk.h');
+  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').match(/\{([^}]*)\}/)[1].split(',').map(Number) : null;
+}
+globalThis.NNUE47 = { chess: load('nnue_chess.h', 'NNC'), xq: load('nnue_xq.h', 'NNX'), kpk: kpk() };
